@@ -1,0 +1,15 @@
+INPUT(
+./release\main.o
+./release\mainwindow.o
+./release\viodpo7254.o
+./release\vioperation.o
+./release\viophead.o
+./release\viopsignalgenerator.o
+./release\viop33250a.o
+./release\viopn5172b.o
+./release\vioneceoperate.o
+./release\viopr3408b.o
+./release\moc_mainwindow.o
+./release\moc_vioperation.o
+./release\moc_viophead.o
+);

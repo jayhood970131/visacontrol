@@ -1,0 +1,13 @@
+debug/main.o
+debug/mainwindow.o
+debug/viodpo7254.o
+debug/vioperation.o
+debug/viophead.o
+debug/viopsignalgenerator.o
+debug/viop33250a.o
+debug/viopn5172b.o
+debug/vioneceoperate.o
+debug/viopr3408b.o
+debug/moc_mainwindow.o
+debug/moc_vioperation.o
+debug/moc_viophead.o

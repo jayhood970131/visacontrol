@@ -1,0 +1,12 @@
+main.o
+mainwindow.o
+vioperation.o
+viophead.o
+viopsignalgenerator.o
+viop33250a.o
+viopn5172b.o
+vioneceoperate.o
+viopr3408b.o
+moc_mainwindow.o
+moc_vioperation.o
+moc_viophead.o

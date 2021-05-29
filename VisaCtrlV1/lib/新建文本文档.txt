@@ -1,0 +1,2 @@
+
+ LIBS += -LC:/Users/Administrator/Desktop/VisaCtrlRxF/code/VisaCtrlV1/lib -lktvisa32
