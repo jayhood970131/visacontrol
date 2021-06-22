@@ -54,9 +54,20 @@ VIOpD7254*  MainWindow::ptr_D7254=nullptr;
 static QSerialPort *serial;
 static int PortOneFrameSize=100;
 
+static QString const SG_OFFICEHADNLE("Excel.application"); // excel应用程序的句柄符号
+static QString const SG_WPSHANDLE("ket.application"); // wps应用程序的句柄符号
+
 using namespace libxl;
 //static Book* book;
 //static Sheet* sheet;
+
+void closeExcel(QAxObject *excel, QAxObject *workbook) {
+    workbook->dynamicCall("Save()"); // 保存excel
+    workbook->dynamicCall("Close()"); // 关闭工作簿
+    excel->dynamicCall("Quit(void)"); // 退出excel应用程序
+    delete excel;
+    excel = nullptr;
+}
 
 MainWindow::MainWindow(QWidget *parent) :
     QMainWindow(parent),
@@ -113,26 +124,26 @@ MainWindow::MainWindow(QWidget *parent) :
     isR3408BConnected=MainWindow::ptr_R3408B->viop_viOpen(addr_R3408B.toUtf8().data());
     isD7245Connected =MainWindow::ptr_D7254->viop_viOpen(addr_DPO7254.toUtf8().data());
 
-     if(isN5172BConnected)
-     {
-         windowText="N5172B信号源 "+windowText;
-         labelLinkStatus->setText(windowText);
-     }
-     if(isR3408BConnected)
-     {
-         windowText="R3408B频谱仪 "+windowText;
-         labelLinkStatus->setText(windowText);
-     }
+    if(isN5172BConnected)
+    {
+        windowText="N5172B信号源 "+windowText;
+        labelLinkStatus->setText(windowText);
+    }
+    if(isR3408BConnected)
+    {
+        windowText="R3408B频谱仪 "+windowText;
+        labelLinkStatus->setText(windowText);
+    }
 
-     if(isD7245Connected)
-     {
-         windowText="D7254示波器 "+windowText;
-         labelLinkStatus->setText(windowText);
-     }
+    if(isD7245Connected)
+    {
+        windowText="D7254示波器 "+windowText;
+        labelLinkStatus->setText(windowText);
+    }
 
-     ui->EditBoard->setValidator(new QRegExpValidator(QRegExp("[0-9]+$")));     //限制只能输入数字
-     ui->EditamplUP->setValidator(new QIntValidator(-100,100,this));
-     ui->EditamplLW->setValidator(new QIntValidator(-100,100,this));
+    ui->EditBoard->setValidator(new QRegExpValidator(QRegExp("[0-9]+$")));     //限制只能输入数字
+    ui->EditamplUP->setValidator(new QIntValidator(-100,100,this));
+    ui->EditamplLW->setValidator(new QIntValidator(-100,100,this));
 
     //设置table widget表格自适应
     ui->tblWidget->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
@@ -142,245 +153,323 @@ MainWindow::MainWindow(QWidget *parent) :
     frepots<<"5.8258"<<"5.8283"<<"5.8315"<<"5.8316"<<"5.8317"<<"5.8383"<<"5.8385"<<"5.8415"<<"5.8417";
     for(int i=0;i<9;i++)
     {
-       ui->tblWidget->setItem(0,i,new QTableWidgetItem(frepots[i]));
+        ui->tblWidget->setItem(0,i,new QTableWidgetItem(frepots[i]));
     }
 
-     //Tx输出功率范围设置
-      ui->cbxTxFreUnits->addItem("GHz");
-      ui->cbxTxFreUnits->addItem("MHz");
-      ui->cbxTxFreUnits->addItem("KHz");
-      ui->cbxTxSpanUnits->addItem("GHz");
-      ui->cbxTxSpanUnits->addItem("MHz");
-      ui->cbxTxSpanUnits->addItem("KHz");
-      ui->cbxTxStarFreUnits->addItem("GHz");
-      ui->cbxTxStarFreUnits->addItem("MHz");
-      ui->cbxTxStarFreUnits->addItem("KHz");
-      ui->cbxTxStopFreUnits->addItem("GHz");
-      ui->cbxTxStopFreUnits->addItem("MHz");
-      ui->cbxTxStopFreUnits->addItem("KHz");
+    //Tx输出功率范围设置
+    ui->cbxTxFreUnits->addItem("GHz");
+    ui->cbxTxFreUnits->addItem("MHz");
+    ui->cbxTxFreUnits->addItem("KHz");
+    ui->cbxTxSpanUnits->addItem("GHz");
+    ui->cbxTxSpanUnits->addItem("MHz");
+    ui->cbxTxSpanUnits->addItem("KHz");
+    ui->cbxTxStarFreUnits->addItem("GHz");
+    ui->cbxTxStarFreUnits->addItem("MHz");
+    ui->cbxTxStarFreUnits->addItem("KHz");
+    ui->cbxTxStopFreUnits->addItem("GHz");
+    ui->cbxTxStopFreUnits->addItem("MHz");
+    ui->cbxTxStopFreUnits->addItem("KHz");
 
-      //选择文件
-      connect(ui->btnTxChoseExcel,&QPushButton::clicked,[&](){
+#pragma region 唤醒灵敏度测试模块 {
+    // 初始化应用句柄符号和信号槽
+    ui->rb_office->setChecked(true);
+    this->m_appHandle = SG_OFFICEHADNLE;
+    qDebug() << this->m_appHandle;
+    connect(ui->rb_office, &QRadioButton::toggled,[&](){
+        this->m_appHandle = SG_OFFICEHADNLE;
+    });
+    connect(ui->rb_wps, &QRadioButton::toggled,[&](){
+        this->m_appHandle = SG_WPSHANDLE;
+    });
 
-          filepath =QFileDialog::getOpenFileName(this,("选择文件"),("C:\\Users\\ztp\\Desktop"),("*.xls *.xlsx *.csv *.xlsm")); //获取保存路径
-          if(filepath.isEmpty())
-          {
-              QMessageBox::critical(this, "错误信息", "没有找到EXCEL");
-                  return;
-          }
-           excel->setControl("ket.Application");                   //连接WPS
-           excel->dynamicCall("SetVisible(bool Visible)","false"); //不显示窗体
-           excel->setProperty("DisplayAlerts", false);             //不显示任何警告信息。如果为true那么在关闭是会出现类似“文件已修改，是否保存”的提示
-           workbooks = excel->querySubObject("WorkBooks");         //获取工作簿集合
-           workbooks->dynamicCall("Open(const QString&)",QDir::toNativeSeparators(filepath));  //打开打开已存在的工作簿
-           workbook = excel->querySubObject("ActiveWorkBook");     //获取当前工作簿
-           worksheets = workbook->querySubObject("WorkSheets");     //获取工作表集合
-           worksheet = worksheets->querySubObject("Item(int)",1);   //获取工作表集合的工作表1，即sheet1
-           QMessageBox::information(this,"提示","选择成功");
-      });
+    // 添加新行，新行用来设置唤醒灵敏度的频率范围和步长
+    connect(ui->btn_newLineWu, &QPushButton::clicked, [&](){
+        int row_count = ui->tbl_spanSet->rowCount();
+        qDebug() << row_count;
+        ui->tbl_spanSet->insertRow(row_count);
+    });
+    // 删除选中的行，如果行未被选中则删除最下面的一行
+    connect(ui->btn_removeLineWu, &QPushButton::clicked, [&](){
+        int row_index = ui->tbl_spanSet->currentRow();
+        if (row_index != -1) {
+            ui->tbl_spanSet->removeRow(row_index);
+        } else {
+            int row_count = ui->tbl_spanSet->rowCount();
+            if (row_count != 0) {
+                ui->tbl_spanSet->removeRow(row_count - 1);
+            }
+        }
+    });
+    // 确认配置,将设置的频率范围填入表格中
+    connect(ui->btn_finishConfigWu, &QPushButton::clicked, [&](){
+        int row_count = ui->tbl_spanSet->rowCount(); // 频率范围表格的行数
+        if (row_count == 0) { // 若表格为空
+            QMessageBox::information(this,"设置失败","表格为空");
+            return;
+        }
+        QString filepathWu;
+        filepathWu =QFileDialog::getOpenFileName(nullptr,("选择文件"),("C:/Users/ztp/Desktop"),("*.xls *.xlsx *.csv")); //获取保存路径
+        if(filepathWu.isEmpty())
+        {
+            QMessageBox::critical(nullptr, "错误信息", "没有找到EXCEL");
+            return;
+        }
+        QAxObject *excelwu = new QAxObject();
 
-      //写入数据
-      connect(ui->btnTxWrite,&QPushButton::clicked,[&](){
-           QString BoardInfo=ui->EditTxBoardNum->text()+"号板";
+        excelwu->setControl(this->m_appHandle); // 连接应用句柄符号
+        excelwu->dynamicCall("SetVisible(bool Visible)","false");                   //不显示窗体
+        excelwu->setProperty("DisplayAlerts", false);                               //不显示任何警告信息。如果为true那么在关闭是会出现类似“文件已修改，是否保存”的提示
+        QAxObject* workbookswu = excelwu->querySubObject("WorkBooks");                //获取工作簿集合
+        workbookswu->dynamicCall("Open(const QString&)",filepathWu);                  //打开打开已存在的工作簿
+        QAxObject *workbookwu = excelwu->querySubObject("ActiveWorkBook");            //获取当前工作簿
+        QAxObject *worksheetswu = workbookwu->querySubObject("WorkSheets");           //获取工作表集合
+        QAxObject *worksheetwu = worksheetswu->querySubObject("Item(int)",1);         //获取工作表集合的工作表1，即sheet1
+        QAxObject *cellA;
+        cellA = worksheetwu->querySubObject("Cells(int, int)", 1, 1); // 获取第一行第一列
+        cellA->dynamicCall("SetValue(const QVariant&)", "序号");
+        cellA = worksheetwu->querySubObject("Cells(int, int)", 1, 2); // 获取第一行第二列
+        cellA->dynamicCall("SetValue(const QVariant&)", "原始装袋");
+        cellA = worksheetwu->querySubObject("Cells(int, int)", 1, 3); // 获取第一行第三列
+        cellA->dynamicCall("SetValue(const QVariant&)", "L0频率点");
 
-           ptr_R3408B->VIOpR3408B::viop_markerMovePeak();                               //marker移动到peak
-           result=ptr_R3408B->VIOpR3408B::viop_ReturnTestPower();
-           double c=charTodouble(result);
-           QAxObject *cellA = worksheet->querySubObject("Cells(int,int)",Txrow,1);
-           cellA->dynamicCall("SetValue(const QVariant&)",QVariant(BoardInfo));
-           QAxObject *cellB = worksheet->querySubObject("Cells(int,int)",Txrow,2);
-           cellB->dynamicCall("SetValue(const QVariant&)",QVariant(c));
-           workbook->dynamicCall("SaveAs(const QString&)",QDir::toNativeSeparators(filepath));
-           Txrow++;
-           QMessageBox::information(this,"提示","数据已写入");
-      });
+        int i, j = 4;
+        for (i = 0; i < row_count; ++i) { // 将表格的频率范围通通设置到excel里去
+            double freDown = ui->tbl_spanSet->item(i, 0)->text().toDouble(); // 频率下界
+            double freUp = ui->tbl_spanSet->item(i, 1)->text().toDouble(); // 频率上界
+            double freStep = ui->tbl_spanSet->item(i, 2)->text().toDouble(); // 步长
+            for (; freDown < freUp; freDown += freStep) {
+                cellA = worksheetwu->querySubObject("Cells(int, int)", 1, j); // 获取当前应该设置频率的单元格
+                j++;
+                cellA->dynamicCall("SetValue(const QVariant&)", freDown); // 设置频率
+            }
+        }
 
-      //关闭文件
-      connect(ui->btnTxEnd,&QPushButton::clicked,[&]()
-      {
-          int numchip=ui->EditTxBoardNum->text().toInt();
-          numchip++;
-          ui->EditTxBoardNum->setText(QString::number(numchip));
-          //关闭WPS
-          workbook->dynamicCall("SaveAs(const QString&)",QDir::toNativeSeparators(filepath));
-          workbook->dynamicCall("Close(boolean)",false);                              //关闭工作簿
-          excel->dynamicCall("Quit(void)");                                  //关闭excel
-          delete excel;
-          excel=nullptr;
-          QMessageBox::information(this,"提示","Tx测试结束");
-      });
+        closeExcel(excelwu, workbookwu);
+        QMessageBox::information(this, "设置", "设置完毕");
+    });
+#pragma endregion }
+    //选择文件
+    connect(ui->btnTxChoseExcel,&QPushButton::clicked,[&](){
 
-      connect(ui->btnWuSet,&QPushButton::clicked,[&]()
-      {
-          //CH1:SCALE  1.0000E+00 1V
-          ptr_D7254->VIOpD7254::viop_VerticalScale();
-         //设置horize Scale 500ms  2.0ms
-//          ptr_D7254->VIOpD7254::viop_HorizeScale5();
-          ptr_D7254->VIOpD7254::viop_HorizeScale2();
-          //set high
-          ptr_D7254->VIOpD7254::viop_set();
-      });
+        filepath =QFileDialog::getOpenFileName(this,("选择文件"),("C:\\Users\\ztp\\Desktop"),("*.xls *.xlsx *.csv *.xlsm")); //获取保存路径
+        if(filepath.isEmpty())
+        {
+            QMessageBox::critical(this, "错误信息", "没有找到EXCEL");
+            return;
+        }
+        excel->setControl("ket.Application");                   //连接WPS
+        excel->dynamicCall("SetVisible(bool Visible)","false"); //不显示窗体
+        excel->setProperty("DisplayAlerts", false);             //不显示任何警告信息。如果为true那么在关闭是会出现类似“文件已修改，是否保存”的提示
+        workbooks = excel->querySubObject("WorkBooks");         //获取工作簿集合
+        workbooks->dynamicCall("Open(const QString&)",QDir::toNativeSeparators(filepath));  //打开打开已存在的工作簿
+        workbook = excel->querySubObject("ActiveWorkBook");     //获取当前工作簿
+        worksheets = workbook->querySubObject("WorkSheets");     //获取工作表集合
+        worksheet = worksheets->querySubObject("Item(int)",1);   //获取工作表集合的工作表1，即sheet1
+        QMessageBox::information(this,"提示","选择成功");
+    });
 
+    //写入数据
+    connect(ui->btnTxWrite,&QPushButton::clicked,[&](){
+        QString BoardInfo=ui->EditTxBoardNum->text()+"号板";
 
-      connect(ui->btnWuN5172B,&QPushButton::clicked,[&](){
-          //设置信号源配置
-          QString amplWu=ui->EditAmplWuUp->text();
-          QString freWu=ui->EditWuFre->text();
-          ptr_N5172B->VIOpSignalGenerator::viop_realtimeOn();                  //realtime
-          ptr_N5172B->VIOpSignalGenerator::viop_modulationType();              //设置ASK
-          ptr_N5172B->VIOpSignalGenerator::viop_alpha();                       //设置阿尔法为1
-          ptr_N5172B->VIOpSignalGenerator::viop_alphaDepth();                  //85%
-          ptr_N5172B->VIOpSignalGenerator::viop_symbolRate(28);               //symbol rate 默认单位Ksps
-          ptr_N5172B->VIOpSignalGenerator::viop_loadDataWU();                  //load文件14K_TEST_28@BIT
-          ptr_N5172B->VIOpSignalGenerator::viop_displayMode(SCIENTIFIC);       //科学计数法显示误码率
-          ptr_N5172B->VIOpSignalGenerator::viop_BERTtriggerSource(IMM);        //trigger-immediate
-          ptr_N5172B->VIOpSignalGenerator::SetAmpl(amplWu);                  //设置ampl-50
-          ptr_N5172B->VIOpSignalGenerator::SetFre(freWu);
-          ptr_N5172B->VIOpSignalGenerator::viop_MODOn();
-          ptr_N5172B->VIOpSignalGenerator::viop_RFOn();                        //打开RF
-//          ptr_N5172B->VIOpSignalGenerator::viop_bertOn();                      //打开
-      });
+        ptr_R3408B->VIOpR3408B::viop_markerMovePeak();                               //marker移动到peak
+        result=ptr_R3408B->VIOpR3408B::viop_ReturnTestPower();
+        double c=charTodouble(result);
+        QAxObject *cellA = worksheet->querySubObject("Cells(int,int)",Txrow,1);
+        cellA->dynamicCall("SetValue(const QVariant&)",QVariant(BoardInfo));
+        QAxObject *cellB = worksheet->querySubObject("Cells(int,int)",Txrow,2);
+        cellB->dynamicCall("SetValue(const QVariant&)",QVariant(c));
+        workbook->dynamicCall("SaveAs(const QString&)",QDir::toNativeSeparators(filepath));
+        Txrow++;
+        QMessageBox::information(this,"提示","数据已写入");
+    });
 
+    //关闭文件
+    connect(ui->btnTxEnd,&QPushButton::clicked,[&]()
+    {
+        int numchip=ui->EditTxBoardNum->text().toInt();
+        numchip++;
+        ui->EditTxBoardNum->setText(QString::number(numchip));
+        //关闭WPS
+        workbook->dynamicCall("SaveAs(const QString&)",QDir::toNativeSeparators(filepath));
+        workbook->dynamicCall("Close(boolean)",false);                              //关闭工作簿
+        excel->dynamicCall("Quit(void)");                                  //关闭excel
+        delete excel;
+        excel=nullptr;
+        QMessageBox::information(this,"提示","Tx测试结束");
+    });
 
-      //唤醒灵敏度测试
-      connect(ui->btnWuTest,&QPushButton::clicked,[&](){
-          //测试步骤
-          QString filepathWu;
-          filepathWu =QFileDialog::getOpenFileName(nullptr,("选择文件"),("C:/Users/ztp/Desktop"),("*.xls *.xlsx *.csv")); //获取保存路径
-          if(filepathWu.isEmpty())
-          {
-              QMessageBox::critical(nullptr, "错误信息", "没有找到EXCEL");
-                  return;
-          }
-          QAxObject *excelwu = new QAxObject();
-          excelwu->setControl("ket.Application");                                     //连接WPS
-          excelwu->dynamicCall("SetVisible(bool Visible)","false");                   //不显示窗体
-          excelwu->setProperty("DisplayAlerts", false);                               //不显示任何警告信息。如果为true那么在关闭是会出现类似“文件已修改，是否保存”的提示
-          QAxObject* workbookswu = excelwu->querySubObject("WorkBooks");                //获取工作簿集合
-          workbookswu->dynamicCall("Open(const QString&)",filepathWu);                  //打开打开已存在的工作簿
-          QAxObject *workbookwu = excelwu->querySubObject("ActiveWorkBook");            //获取当前工作簿
-          QAxObject *worksheetswu = workbookwu->querySubObject("WorkSheets");           //获取工作表集合
-          QAxObject *worksheetwu = worksheetswu->querySubObject("Item(int)",1);         //获取工作表集合的工作表1，即sheet1
-          QAxObject *cellA;
-          if(TestFirstWu)
-          {
-               cellA = worksheetwu->querySubObject("Cells(int,int)",1,1);
-               cellA->dynamicCall("SetValue(const QVariant&)","No.");         //写入数据
-               cellA->setProperty("HorizontalAlignment", -4108);                     //居中
-               cellA->setProperty("VerticalAlignment", -4108);                       //居中
-               cellA = worksheetwu->querySubObject("Cells(int,int)",1,2);
-               cellA->dynamicCall("SetValue(const QVariant&)","5.83");         //写入数据
-               cellA->setProperty("HorizontalAlignment", -4108);                     //居中
-               cellA->setProperty("VerticalAlignment", -4108);                       //居中
-               cellA = worksheetwu->querySubObject("Cells(int,int)",1,3);
-               cellA->dynamicCall("SetValue(const QVariant&)","5.84");         //写入数据
-               cellA->setProperty("HorizontalAlignment", -4108);                     //居中
-               cellA->setProperty("VerticalAlignment", -4108);                       //居中
-               TestFirstWu=false;
-          }
-
-          cellA = worksheetwu->querySubObject("Cells(int,int)",row,1);
-          cellA->dynamicCall("SetValue(const QVariant&)",ui->EditBoardWu->text());   //芯片号
-          cellA->setProperty("HorizontalAlignment", -4108);                     //居中
-          cellA->setProperty("VerticalAlignment", -4108);                       //居中
-           int stringminus=ui->Wuline->text().toInt();
-           ptr_N5172B->VIOpSignalGenerator::SetAmpl(ui->EditAmplWuUp->text());
-           Delay_MSec(2000);
-           result=ptr_D7254->VIOpD7254::viop_DPOQueValueMean();      //求出第一个值
-           double standResult=QString(result).toDouble();
-           int up=ui->EditAmplWuUp->text().toInt();
-           int down=ui->EditAmplWuDown->text().toInt();
-           int stp=ui->EditWuAmplStep->text().toInt();
-
-           ptr_N5172B->VIOpSignalGenerator::SetFre("5.83");                //设置频率
-          for(int i=up;i>=down;i-=stp)
-          {
-              ptr_N5172B->VIOpSignalGenerator::SetAmpl(QString::number(i));   //设置功率
-              Delay_MSec(2500);
-              p=ptr_D7254->VIOpD7254::viop_DPOQueValueMean();
-              double c=QString(p).toDouble();
-              if(abs(c-standResult)>=1)
-              {
-                  cellA = worksheetwu->querySubObject("Cells(int,int)",row,2);
-                  cellA->dynamicCall("SetValue(const QVariant&)",QString::number(i+1+stringminus));
-                  i=down-1;
-              }
-          }
-         //设置频率5.84
-         ptr_N5172B->VIOpSignalGenerator::SetFre("5.84");                //设置频率
-         ptr_N5172B->VIOpSignalGenerator::SetAmpl(ui->EditAmplWuUp->text());   //设置功率
-         Delay_MSec(3000);
-         result=ptr_D7254->VIOpD7254::viop_DPOQueValueMean();             //求出第一个值
-         standResult=QString(result).toDouble();
-         for(int i=up;i>=down;i-=stp)
-         {
-             ptr_N5172B->VIOpSignalGenerator::SetAmpl(QString::number(i));   //设置功率
-             Delay_MSec(2500);
-             p=ptr_D7254->VIOpD7254::viop_DPOQueValueMean();
-             double c=QString(p).toDouble();
-             if(abs(c-standResult)>=1)
-             {
-                 cellA = worksheetwu->querySubObject("Cells(int,int)",row,3);
-                 cellA->dynamicCall("SetValue(const QVariant&)",QString::number(i+1+stringminus));
-                 i=down-1;
-             }
-         }
-         chipNum=ui->EditBoardWu->text().toInt();
-         chipNum++;
-         ui->EditBoardWu->setText(QString::number(chipNum));    //更新芯片号
-         chipNum=1;
-         row++;
-          ui->WulineRow->setText(QString::number(row));
-          free(result);
-          free(p);
-          result=nullptr;
-          p=nullptr;
-          //关闭文件
-          workbookwu->dynamicCall("SaveAs(const QString&)",QDir::toNativeSeparators(filepathWu));
-          workbookwu->dynamicCall("Close()");                               //关闭工作簿
-          excelwu->dynamicCall("Quit()");                                   //关闭excel
-          delete excelwu;
-          excelwu=nullptr;
-          QMessageBox::information(this,tr("完成"),tr("测试完成"));
-      });
+    connect(ui->btnWuSet,&QPushButton::clicked,[&]()
+    {
+        //CH1:SCALE  1.0000E+00 1V
+        ptr_D7254->VIOpD7254::viop_VerticalScale();
+        //设置horize Scale 500ms  2.0ms
+        //          ptr_D7254->VIOpD7254::viop_HorizeScale5();
+        ptr_D7254->VIOpD7254::viop_HorizeScale2();
+        //set high
+        ptr_D7254->VIOpD7254::viop_set();
+    });
 
 
+    connect(ui->btnWuN5172B,&QPushButton::clicked,[&](){
+        //设置信号源配置
+        QString amplWu=ui->EditAmplWuUp->text();
+        QString freWu=ui->EditWuFre->text();
+        ptr_N5172B->VIOpSignalGenerator::viop_realtimeOn();                  //realtime
+        ptr_N5172B->VIOpSignalGenerator::viop_modulationType();              //设置ASK
+        ptr_N5172B->VIOpSignalGenerator::viop_alpha();                       //设置阿尔法为1
+        ptr_N5172B->VIOpSignalGenerator::viop_alphaDepth();                  //85%
+        ptr_N5172B->VIOpSignalGenerator::viop_symbolRate(28);               //symbol rate 默认单位Ksps
+        ptr_N5172B->VIOpSignalGenerator::viop_loadDataWU();                  //load文件14K_TEST_28@BIT
+        ptr_N5172B->VIOpSignalGenerator::viop_displayMode(SCIENTIFIC);       //科学计数法显示误码率
+        ptr_N5172B->VIOpSignalGenerator::viop_BERTtriggerSource(IMM);        //trigger-immediate
+        ptr_N5172B->VIOpSignalGenerator::SetAmpl(amplWu);                  //设置ampl-50
+        ptr_N5172B->VIOpSignalGenerator::SetFre(freWu);
+        ptr_N5172B->VIOpSignalGenerator::viop_MODOn();
+        ptr_N5172B->VIOpSignalGenerator::viop_RFOn();                        //打开RF
+        //          ptr_N5172B->VIOpSignalGenerator::viop_bertOn();                      //打开
+    });
 
 
-
-
-
-
-
-      //span开始频率
-      connect(ui->btnTxStarFre,&QPushButton::clicked,[&](){
-         ptr_R3408B->VIOpR3408B::viop_startfreq(ui->EditTxStarFre->text(), ui->cbxTxStarFreUnits->currentIndex());
-
-       });
-      //span结束频率
-      connect(ui->btnTxStopFre,&QPushButton::clicked,[&](){
-          ptr_R3408B->VIOpR3408B::viop_stopfreq(ui->EditTxStopFre->text(), ui->cbxTxStopFreUnits->currentIndex());
-       });
-
-      //中心频率
-      connect(ui->btnTxCenterFre,&QPushButton::clicked,[&](){
-           ptr_R3408B->VIOpR3408B::viop_CentralFre(ui->EditTxFre->text(),ui->cbxTxFreUnits->currentIndex());
-      });
-
-      //span设置
-      connect(ui->btnTxSpan,&QPushButton::clicked,[&](){
-       ptr_R3408B->VIOpR3408B::VIOpR3408B::viop_span(ui->EditTxSpan->text() ,ui->cbxTxSpanUnits->currentIndex());
-      });
-
-       //Wu定频点测试
-      connect(ui->WuFreTest,&QPushButton::clicked,[&](){
+    //唤醒灵敏度测试
+    connect(ui->btnWuTest,&QPushButton::clicked,[&](){
         //测试步骤
         QString filepathWu;
         filepathWu =QFileDialog::getOpenFileName(nullptr,("选择文件"),("C:/Users/ztp/Desktop"),("*.xls *.xlsx *.csv")); //获取保存路径
         if(filepathWu.isEmpty())
         {
             QMessageBox::critical(nullptr, "错误信息", "没有找到EXCEL");
-                return;
+            return;
+        }
+        QAxObject *excelwu = new QAxObject();
+        excelwu->setControl("ket.Application");                                     //连接WPS
+        excelwu->dynamicCall("SetVisible(bool Visible)","false");                   //不显示窗体
+        excelwu->setProperty("DisplayAlerts", false);                               //不显示任何警告信息。如果为true那么在关闭是会出现类似“文件已修改，是否保存”的提示
+        QAxObject* workbookswu = excelwu->querySubObject("WorkBooks");                //获取工作簿集合
+        workbookswu->dynamicCall("Open(const QString&)",filepathWu);                  //打开打开已存在的工作簿
+        QAxObject *workbookwu = excelwu->querySubObject("ActiveWorkBook");            //获取当前工作簿
+        QAxObject *worksheetswu = workbookwu->querySubObject("WorkSheets");           //获取工作表集合
+        QAxObject *worksheetwu = worksheetswu->querySubObject("Item(int)",1);         //获取工作表集合的工作表1，即sheet1
+        QAxObject *cellA;
+        if(TestFirstWu)
+        {
+            cellA = worksheetwu->querySubObject("Cells(int,int)",1,1);
+            cellA->dynamicCall("SetValue(const QVariant&)","No.");         //写入数据
+            cellA->setProperty("HorizontalAlignment", -4108);                     //居中
+            cellA->setProperty("VerticalAlignment", -4108);                       //居中
+            cellA = worksheetwu->querySubObject("Cells(int,int)",1,2);
+            cellA->dynamicCall("SetValue(const QVariant&)","5.83");         //写入数据
+            cellA->setProperty("HorizontalAlignment", -4108);                     //居中
+            cellA->setProperty("VerticalAlignment", -4108);                       //居中
+            cellA = worksheetwu->querySubObject("Cells(int,int)",1,3);
+            cellA->dynamicCall("SetValue(const QVariant&)","5.84");         //写入数据
+            cellA->setProperty("HorizontalAlignment", -4108);                     //居中
+            cellA->setProperty("VerticalAlignment", -4108);                       //居中
+            TestFirstWu=false;
+        }
+
+        cellA = worksheetwu->querySubObject("Cells(int,int)",row,1);
+        cellA->dynamicCall("SetValue(const QVariant&)",ui->EditBoardWu->text());   //芯片号
+        cellA->setProperty("HorizontalAlignment", -4108);                     //居中
+        cellA->setProperty("VerticalAlignment", -4108);                       //居中
+        int stringminus=ui->Wuline->text().toInt();
+        ptr_N5172B->VIOpSignalGenerator::SetAmpl(ui->EditAmplWuUp->text());
+        Delay_MSec(2000);
+        result=ptr_D7254->VIOpD7254::viop_DPOQueValueMean();      //求出第一个值
+        double standResult=QString(result).toDouble();
+        int up=ui->EditAmplWuUp->text().toInt();
+        int down=ui->EditAmplWuDown->text().toInt();
+        int stp=ui->EditWuAmplStep->text().toInt();
+
+        ptr_N5172B->VIOpSignalGenerator::SetFre("5.83");                //设置频率
+        for(int i=up;i>=down;i-=stp)
+        {
+            ptr_N5172B->VIOpSignalGenerator::SetAmpl(QString::number(i));   //设置功率
+            Delay_MSec(2500);
+            p=ptr_D7254->VIOpD7254::viop_DPOQueValueMean();
+            double c=QString(p).toDouble();
+            if(abs(c-standResult)>=1)
+            {
+                cellA = worksheetwu->querySubObject("Cells(int,int)",row,2);
+                cellA->dynamicCall("SetValue(const QVariant&)",QString::number(i+1+stringminus));
+                i=down-1;
+            }
+        }
+        //设置频率5.84
+        ptr_N5172B->VIOpSignalGenerator::SetFre("5.84");                //设置频率
+        ptr_N5172B->VIOpSignalGenerator::SetAmpl(ui->EditAmplWuUp->text());   //设置功率
+        Delay_MSec(3000);
+        result=ptr_D7254->VIOpD7254::viop_DPOQueValueMean();             //求出第一个值
+        standResult=QString(result).toDouble();
+        for(int i=up;i>=down;i-=stp)
+        {
+            ptr_N5172B->VIOpSignalGenerator::SetAmpl(QString::number(i));   //设置功率
+            Delay_MSec(2500);
+            p=ptr_D7254->VIOpD7254::viop_DPOQueValueMean();
+            double c=QString(p).toDouble();
+            if(abs(c-standResult)>=1)
+            {
+                cellA = worksheetwu->querySubObject("Cells(int,int)",row,3);
+                cellA->dynamicCall("SetValue(const QVariant&)",QString::number(i+1+stringminus));
+                i=down-1;
+            }
+        }
+        chipNum=ui->EditBoardWu->text().toInt();
+        chipNum++;
+        ui->EditBoardWu->setText(QString::number(chipNum));    //更新芯片号
+        chipNum=1;
+        row++;
+        ui->WulineRow->setText(QString::number(row));
+        free(result);
+        free(p);
+        result=nullptr;
+        p=nullptr;
+        //关闭文件
+        workbookwu->dynamicCall("SaveAs(const QString&)",QDir::toNativeSeparators(filepathWu));
+        workbookwu->dynamicCall("Close()");                               //关闭工作簿
+        excelwu->dynamicCall("Quit()");                                   //关闭excel
+        delete excelwu;
+        excelwu=nullptr;
+        QMessageBox::information(this,tr("完成"),tr("测试完成"));
+    });
+
+
+
+
+
+
+
+
+
+    //span开始频率
+    connect(ui->btnTxStarFre,&QPushButton::clicked,[&](){
+        ptr_R3408B->VIOpR3408B::viop_startfreq(ui->EditTxStarFre->text(), ui->cbxTxStarFreUnits->currentIndex());
+
+    });
+    //span结束频率
+    connect(ui->btnTxStopFre,&QPushButton::clicked,[&](){
+        ptr_R3408B->VIOpR3408B::viop_stopfreq(ui->EditTxStopFre->text(), ui->cbxTxStopFreUnits->currentIndex());
+    });
+
+    //中心频率
+    connect(ui->btnTxCenterFre,&QPushButton::clicked,[&](){
+        ptr_R3408B->VIOpR3408B::viop_CentralFre(ui->EditTxFre->text(),ui->cbxTxFreUnits->currentIndex());
+    });
+
+    //span设置
+    connect(ui->btnTxSpan,&QPushButton::clicked,[&](){
+        ptr_R3408B->VIOpR3408B::VIOpR3408B::viop_span(ui->EditTxSpan->text() ,ui->cbxTxSpanUnits->currentIndex());
+    });
+
+    //Wu定频点测试
+    connect(ui->WuFreTest,&QPushButton::clicked,[&](){
+        //测试步骤
+        QString filepathWu;
+        filepathWu =QFileDialog::getOpenFileName(nullptr,("选择文件"),("C:/Users/ztp/Desktop"),("*.xls *.xlsx *.csv")); //获取保存路径
+        if(filepathWu.isEmpty())
+        {
+            QMessageBox::critical(nullptr, "错误信息", "没有找到EXCEL");
+            return;
         }
         QAxObject *excelwu = new QAxObject();
         excelwu->setControl("ket.Application");                                     //连接WPS
@@ -398,15 +487,15 @@ MainWindow::MainWindow(QWidget *parent) :
 
         if(TestFirstWuFre)
         {
-             cellA = worksheetwu->querySubObject("Cells(int,int)",1,1);
-             cellA->dynamicCall("SetValue(const QVariant&)","No.");         //写入数据
-             cellA->setProperty("HorizontalAlignment", -4108);                     //居中
-             cellA->setProperty("VerticalAlignment", -4108);                       //居中
-             cellA = worksheetwu->querySubObject("Cells(int,int)",1,2);
-             cellA->dynamicCall("SetValue(const QVariant&)",wufre);         //写入数据
-             cellA->setProperty("HorizontalAlignment", -4108);                     //居中
-             cellA->setProperty("VerticalAlignment", -4108);                       //居中
-             TestFirstWuFre=false;
+            cellA = worksheetwu->querySubObject("Cells(int,int)",1,1);
+            cellA->dynamicCall("SetValue(const QVariant&)","No.");         //写入数据
+            cellA->setProperty("HorizontalAlignment", -4108);                     //居中
+            cellA->setProperty("VerticalAlignment", -4108);                       //居中
+            cellA = worksheetwu->querySubObject("Cells(int,int)",1,2);
+            cellA->dynamicCall("SetValue(const QVariant&)",wufre);         //写入数据
+            cellA->setProperty("HorizontalAlignment", -4108);                     //居中
+            cellA->setProperty("VerticalAlignment", -4108);                       //居中
+            TestFirstWuFre=false;
         }
 
         cellA = worksheetwu->querySubObject("Cells(int,int)",row,1);
@@ -415,16 +504,16 @@ MainWindow::MainWindow(QWidget *parent) :
         cellA->setProperty("VerticalAlignment", -4108);                       //居中
 
 
-         ptr_N5172B->VIOpSignalGenerator::SetAmpl(ui->EditAmplWuUp->text());
-         Delay_MSec(2000);
-         result=ptr_D7254->VIOpD7254::viop_DPOQueValueMean();               //求出第一个值
+        ptr_N5172B->VIOpSignalGenerator::SetAmpl(ui->EditAmplWuUp->text());
+        Delay_MSec(2000);
+        result=ptr_D7254->VIOpD7254::viop_DPOQueValueMean();               //求出第一个值
 
-         double standResult=QString(result).toDouble();
+        double standResult=QString(result).toDouble();
 
-         int up=ui->EditAmplWuUp->text().toInt();
-         int down=ui->EditAmplWuDown->text().toInt();
-         int stp=ui->EditWuAmplStep->text().toInt();
-         ptr_N5172B->VIOpSignalGenerator::SetFre(wufre);                     //设置频率
+        int up=ui->EditAmplWuUp->text().toInt();
+        int down=ui->EditAmplWuDown->text().toInt();
+        int stp=ui->EditWuAmplStep->text().toInt();
+        ptr_N5172B->VIOpSignalGenerator::SetFre(wufre);                     //设置频率
 
         for(int i=up;i>=down;i-=stp)
         {
@@ -439,10 +528,10 @@ MainWindow::MainWindow(QWidget *parent) :
                 i=down-1;
             }
         }
-       chipNum=ui->EditBoardWu->text().toInt();
-       chipNum++;
-       ui->EditBoardWu->setText(QString::number(chipNum));
-//      chipNum=1;
+        chipNum=ui->EditBoardWu->text().toInt();
+        chipNum++;
+        ui->EditBoardWu->setText(QString::number(chipNum));
+        //      chipNum=1;
         row++;
         ui->WulineRow->setText(QString::number(row));
         free(result);
@@ -458,95 +547,348 @@ MainWindow::MainWindow(QWidget *parent) :
         QMessageBox::information(this,tr("完成"),tr("测试完成"));
     });
 
-      //Wu大功率测试
-     connect(ui->WuMaxAmplTest,&QPushButton::clicked,[&]()
-     {
-         QString filepathWu;
-         filepathWu =QFileDialog::getOpenFileName(nullptr,("选择文件"),("C:/Users/ztp/Desktop"),("*.xls *.xlsx *.csv")); //获取保存路径
-         if(filepathWu.isEmpty())
-         {
-             QMessageBox::critical(nullptr, "错误信息", "没有找到EXCEL");
-                 return;
-         }
-         QAxObject *excelwu = new QAxObject();
-         excelwu->setControl("ket.Application");                                     //连接WPS
-         excelwu->dynamicCall("SetVisible(bool Visible)","false");                   //不显示窗体
-         excelwu->setProperty("DisplayAlerts", false);                               //不显示任何警告信息。如果为true那么在关闭是会出现类似“文件已修改，是否保存”的提示
-         QAxObject* workbookswu = excelwu->querySubObject("WorkBooks");                //获取工作簿集合
-         workbookswu->dynamicCall("Open(const QString&)",filepathWu);                  //打开打开已存在的工作簿
-         QAxObject *workbookwu = excelwu->querySubObject("ActiveWorkBook");            //获取当前工作簿
-         QAxObject *worksheetswu = workbookwu->querySubObject("WorkSheets");           //获取工作表集合
-         QAxObject *worksheetwu = worksheetswu->querySubObject("Item(int)",1);         //获取工作表集合的工作表1，即sheet1
-         QAxObject *cellA;
+    //Wu大功率测试
+    connect(ui->WuMaxAmplTest,&QPushButton::clicked,[&]()
+    {
+        QString filepathWu;
+        filepathWu =QFileDialog::getOpenFileName(nullptr,("选择文件"),("C:/Users/ztp/Desktop"),("*.xls *.xlsx *.csv")); //获取保存路径
+        if(filepathWu.isEmpty())
+        {
+            QMessageBox::critical(nullptr, "错误信息", "没有找到EXCEL");
+            return;
+        }
+        QAxObject *excelwu = new QAxObject();
 
-         if(TestFirstWuMax)
-         {
-              cellA = worksheetwu->querySubObject("Cells(int,int)",1,1);
-              cellA->dynamicCall("SetValue(const QVariant&)","Fre");         //写入数据
-              cellA->setProperty("HorizontalAlignment", -4108);                     //居中
-              cellA->setProperty("VerticalAlignment", -4108);                       //居中
-              cellA = worksheetwu->querySubObject("Cells(int,int)",1,2);
-              cellA->dynamicCall("SetValue(const QVariant&)","Amp");         //写入数据
-              cellA->setProperty("HorizontalAlignment", -4108);                     //居中
-              cellA->setProperty("VerticalAlignment", -4108);                       //居中
-              TestFirstWuMax=false;
-         }
+        excelwu->setControl(this->m_appHandle); // 连接应用句柄符号
+        excelwu->dynamicCall("SetVisible(bool Visible)","false");                   //不显示窗体
+        excelwu->setProperty("DisplayAlerts", false);                               //不显示任何警告信息。如果为true那么在关闭是会出现类似“文件已修改，是否保存”的提示
+        QAxObject* workbookswu = excelwu->querySubObject("WorkBooks");                //获取工作簿集合
+        workbookswu->dynamicCall("Open(const QString&)",filepathWu);                  //打开打开已存在的工作簿
+        QAxObject *workbookwu = excelwu->querySubObject("ActiveWorkBook");            //获取当前工作簿
+        QAxObject *worksheetswu = workbookwu->querySubObject("WorkSheets");           //获取工作表集合
+        QAxObject *worksheetwu = worksheetswu->querySubObject("Item(int)",1);         //获取工作表集合的工作表1，即sheet1
+        QAxObject *cellA; // 操作工作表每个单元格的单元格对象
 
-         cellA = worksheetwu->querySubObject("Cells(int,int)",row++,1);
-         cellA->dynamicCall("SetValue(const QVariant&)",ui->EditBoardWu->text()+"号芯片");   //芯片号
-         cellA->setProperty("HorizontalAlignment", -4108);                     //居中
-         cellA->setProperty("VerticalAlignment", -4108);                       //居中
+        QAxObject *usedRange = worksheetwu->querySubObject("UsedRange"); // 用户使用范围
 
-         double freup=ui->WUFreUp->text().toDouble();
-         double fredown=ui->WUFreDOWN->text().toDouble();
-         double frestep=ui->WUFreStep->text().toDouble()/1000;
+        QAxObject *cols = usedRange->querySubObject("Columns"); // 用户使用范围的列操作对象
+        QAxObject *rows = usedRange->querySubObject("Rows"); // 用户使用范围的行操作对象
+        int colCount = cols->property("Count").toInt(); // 用户使用范围的列数(Tips：行列数并不一定是以第一行第一列计算的，计算的是已经使用的数量范围，与excel表格的行列下标无关
+        int rowCount = rows->property("Count").toInt(); // 用户使用范围的行数
 
-         int ampup1=ui->WUAmpUp->text().toInt();
-         int ampdown=ui->WuAmpDown->text().toInt();
-         int ampstep=ui->WUAmpStep->text().toInt();
+        if (colCount <= 1) { // 证明excel表格不符合要求(正常来说已经设定好了频率测试范围，所以列数不可能小于等于一，空表的列数也为1)
+            closeExcel(excelwu, workbookwu);
+            QMessageBox::information(this, "唤醒测试", "表格不合规，选择合适的表格");
+            return;
+        }
 
-         for(;fredown<=freup;fredown+=frestep)
-         {
-             ampup1=ui->WUAmpUp->text().toInt();
-             ptr_N5172B->VIOpSignalGenerator::SetFre(QString::number(fredown)); //设置频率
-             ptr_N5172B->VIOpSignalGenerator::SetAmpl(QString::number(ampup1+1)); //设置功率
-             result=ptr_D7254->VIOpD7254::viop_DPOQueValueMean();               //求出第一个值
-             double standResult=QString(result).toDouble();
-             Delay_MSec(2000);
-             for(;ampup1>=ampdown;ampup1=ampup1-ampstep)
-             {
-               ptr_N5172B->VIOpSignalGenerator::SetAmpl(QString::number(ampup1)); //设置功率
-               Delay_MSec(2500);
-               p=ptr_D7254->VIOpD7254::viop_DPOQueValueMean();
-               double c=QString(p).toDouble();
-               if(abs(c-standResult)>=1)
-               {
-                   cellA = worksheetwu->querySubObject("Cells(int,int)",row,1);
-                   cellA->dynamicCall("SetValue(const QVariant&)",QString::number(fredown));
-                   cellA = worksheetwu->querySubObject("Cells(int,int)",row++,2);
-                   cellA->dynamicCall("SetValue(const QVariant&)",QString::number(ampup1+ampstep));
-                   continue;
-               }
-             }
-         }
+        QString right; // 频率右界符号
+        if ((colCount - 1) / 26 != 0) { // 计算右界符号
+            char prefix = static_cast<char>('A' + colCount / 26 - 1);
+            char suffix = static_cast<char>('A' + (colCount - 1) % 26);
+            right = QString("%1%2").arg(QChar(prefix)).arg(QChar(suffix)).append("1");
+        } else {
+            char sigleChar = static_cast<char>('A' + (colCount - 1));
+            right = QString(QChar(sigleChar)).append("1");
+        }
+        QList<QVariant> res; // 获取频率的列表
+        try {
+            QAxObject *firstLine = worksheetwu->querySubObject("Range(const QString&)", QString("D1:%1").arg(right)); // 获取频率设置范围
+            QVariant vars = firstLine->property("Value2"); // 获取第一行设置的频率值,是个二维数组
+            QVariantList freList = vars.toList(); // 转化为一维数组
+            int freListRowCount = freList.size();
+            if (freListRowCount != 1) { // 因为只取第一行的频率值，若freList的size不等于一，则为错误，抛出异常
+                throw QException();
+            }
+            res = freList[0].toList();
 
-         chipNum=ui->EditBoardWu->text().toInt();
-         chipNum++;
-         ui->EditBoardWu->setText(QString::number(chipNum));
-         row++;
-         free(result);
-         free(p);
-         result=nullptr;
-         p=nullptr;
-         //关闭文件
-         workbookwu->dynamicCall("SaveAs(const QString&)",QDir::toNativeSeparators(filepathWu));
-         workbookwu->dynamicCall("Close()");                               //关闭工作簿
-         excelwu->dynamicCall("Quit()");                                   //关闭excel
-         delete excelwu;
-         excelwu=nullptr;
-         QMessageBox::information(this,tr("完成"),tr("测试完成"));
-     });
+        } catch (QException ex) {
+            closeExcel(excelwu, workbookwu);
+            QMessageBox::information(this, "唤醒灵敏度测试", "取频率值错误");
+        }
 
+        // 开始补充excel表格里最新一行的芯片信息
+        int cur_col = 1; // 当前处理的列
+        int cur_row = rowCount + 1; // 当前处理的行
+        cellA = worksheetwu->querySubObject("Cells(int, int)", cur_row, cur_col);
+        cur_col++;
+        cellA->dynamicCall("SetValue(const QVariant&)", ui->EditBoardWu->text()); // 设置芯片序号
+        cellA = worksheetwu->querySubObject("Cells(int, int)", cur_row, cur_col);
+        cur_col++;
+        cellA->dynamicCall("SetValue(const QVariant&)", ui->tb_originalPackage->text()); // 设置芯片原始装袋
+        cellA = worksheetwu->querySubObject("Cells(int, int)", cur_row, cur_col);
+        cur_col++;
+        cellA->dynamicCall("SetValue(const QVariant&)", ui->tb_L0Wu->text()); // 设置芯片L0频率点
+
+
+        int preAmpl = -70; // 前一次测量的功率，当首次的时候从最低功率开始
+        // 计算每一个频率下的临界功率
+        for (int i  = 0; i < res.size(); i++) {
+            bool setFre_result = ptr_N5172B->SetFre(QString::number(res[i].toDouble())); // 信号发生器设置信号
+            if (!setFre_result) {
+                closeExcel(excelwu, workbookwu);
+                QMessageBox::warning(this, "矢量信号发生器", "频率设置错误");
+                return;
+            }
+            int ampl = preAmpl;
+            bool lastAmplIsValid = false; // 用来判断上个功率值是否稳定
+            bool isFirst = true; // 判断是否是该频率下第一次测试
+            while (true) { // 中心扩展算法求解合适功率
+                if (ampl == 20 || ampl == -141) { // 边界条件判断
+                    cellA = worksheetwu->querySubObject("Cells(int, int)", cur_row, cur_col);
+                    cur_col++;
+                    if (ampl == 20) {
+                        if (lastAmplIsValid) {
+                            cellA->dynamicCall("SetValue(const QVariant&)", ampl - 1);
+                            preAmpl = ampl -1;
+                        } else {
+                            cellA->dynamicCall("SetValue(const QVariant&)", "xHigh");
+                            preAmpl = 19;
+                        }
+                    } else {
+                        if (lastAmplIsValid) {
+                            cellA->dynamicCall("SetValue(const QVariant&)", ampl + 1);
+                            preAmpl = ampl + 1;
+                        } else {
+                            cellA->dynamicCall("SetValue(const QVariant&)", "xLow");
+                            preAmpl = -140;
+                        }
+                    }
+                    break; // 退出循环
+                }
+                bool setAmpl_result = ptr_N5172B->SetAmpl(QString::number(ampl));
+                if (!setAmpl_result) {
+                    closeExcel(excelwu, workbookwu);
+                    QMessageBox::warning(this, "矢量信号发生器", "功率设置错误");
+                    return;
+                }
+
+                if (isFirst || lastAmplIsValid) { // 如果是第一次测试或者上一次功率稳定
+                    Delay_MSec(2000);
+                    isFirst = false;
+                } else {
+                    Delay_MSec(500);
+                }
+
+                char* str_result = ptr_D7254->viop_DPOQueValueMean(); // 获取数字荧光示波器上的high值-返回值是字符串形式
+                double result = QString(str_result).toDouble();
+                if (result < 1.0) { // 如果功率不稳定
+                    if (lastAmplIsValid) { // 如果上一次功率稳定
+                        cellA = worksheetwu->querySubObject("Cells(int, int)", cur_row, cur_col);
+                        cur_col++;
+                        cellA->dynamicCall("SetValue(const QVariant&)", preAmpl);
+                        break;
+                    } else {
+                        ampl++; // 增大功率
+                    }
+
+                } else { // 如果功率稳定
+                    bool isFinish = false; // 是否完成取值
+                    double value = result;
+                    int j = 0;
+                    for (; j < 3; ++j) { // 循环取值四次判断
+                        Delay_MSec(300);
+                        char* str_result = ptr_D7254->viop_DPOQueValueMean(); // 获取数字荧光示波器上的high值-返回值是字符串形式
+                        double tmp = QString(str_result).toDouble();
+                        if ((value < 1.0 && tmp > 1.0) || (value > 1.0 && tmp < 1.0)) { // 当前值和此前值不在同一范围
+                            // 默认为低
+                            if (lastAmplIsValid) { // 如果上一次功率稳定
+                                cellA = worksheetwu->querySubObject("Cells(int, int)", cur_row, cur_col);
+                                cur_col++;
+                                cellA->dynamicCall("SetValue(const QVariant&)", preAmpl);
+                                isFinish = true;
+                                break;
+                            } else {
+                                break;
+                            }
+                        } else {
+                            value = tmp;
+                        }
+                    } // for j < 3
+                    if (isFinish) {
+                        break;
+                    }
+                    if (j != 3) {
+                        ampl++;
+                    } else {
+                        lastAmplIsValid = true;
+                        preAmpl = ampl;
+                        ampl--; // 降低功率
+                    }
+                }
+            } // while(true)
+
+        } // for i < res.size()
+
+        closeExcel(excelwu, workbookwu);
+        QMessageBox::information(this, "唤醒灵敏度测试", "测试完毕");
+    });
+
+    connect(ui->btn_wuSpanTest2, &QPushButton::clicked, [&](){ // 唤醒灵敏度测试另一算法
+        QString filepathWu;
+        filepathWu =QFileDialog::getOpenFileName(nullptr,("选择文件"),("C:/Users/ztp/Desktop"),("*.xls *.xlsx *.csv")); //获取保存路径
+        if(filepathWu.isEmpty())
+        {
+            QMessageBox::critical(nullptr, "错误信息", "没有找到EXCEL");
+            return;
+        }
+        QAxObject *excelwu = new QAxObject();
+
+        excelwu->setControl(this->m_appHandle); // 连接应用句柄符号
+        excelwu->dynamicCall("SetVisible(bool Visible)","false");                   //不显示窗体
+        excelwu->setProperty("DisplayAlerts", false);                               //不显示任何警告信息。如果为true那么在关闭是会出现类似“文件已修改，是否保存”的提示
+        QAxObject* workbookswu = excelwu->querySubObject("WorkBooks");                //获取工作簿集合
+        workbookswu->dynamicCall("Open(const QString&)",filepathWu);                  //打开打开已存在的工作簿
+        QAxObject *workbookwu = excelwu->querySubObject("ActiveWorkBook");            //获取当前工作簿
+        QAxObject *worksheetswu = workbookwu->querySubObject("WorkSheets");           //获取工作表集合
+        QAxObject *worksheetwu = worksheetswu->querySubObject("Item(int)",1);         //获取工作表集合的工作表1，即sheet1
+        QAxObject *cellA; // 操作工作表每个单元格的单元格对象
+
+        QAxObject *usedRange = worksheetwu->querySubObject("UsedRange"); // 用户使用范围
+
+        QAxObject *cols = usedRange->querySubObject("Columns"); // 用户使用范围的列操作对象
+        QAxObject *rows = usedRange->querySubObject("Rows"); // 用户使用范围的行操作对象
+        int colCount = cols->property("Count").toInt(); // 用户使用范围的列数(Tips：行列数并不一定是以第一行第一列计算的，计算的是已经使用的数量范围，与excel表格的行列下标无关
+        int rowCount = rows->property("Count").toInt(); // 用户使用范围的行数
+
+        if (colCount <= 1) { // 证明excel表格不符合要求(正常来说已经设定好了频率测试范围，所以列数不可能小于等于一，空表的列数也为1)
+            closeExcel(excelwu, workbookwu);
+            QMessageBox::information(this, "唤醒测试", "表格不合规，选择合适的表格");
+            return;
+        }
+
+        QString right; // 频率右界符号
+        if ((colCount - 1) / 26 != 0) { // 计算右界符号
+            char prefix = static_cast<char>('A' + colCount / 26 - 1);
+            char suffix = static_cast<char>('A' + (colCount - 1) % 26);
+            right = QString("%1%2").arg(QChar(prefix)).arg(QChar(suffix)).append("1");
+        } else {
+            char sigleChar = static_cast<char>('A' + (colCount - 1));
+            right = QString(QChar(sigleChar)).append("1");
+        }
+        QList<QVariant> res; // 获取频率的列表
+        try {
+            QAxObject *firstLine = worksheetwu->querySubObject("Range(const QString&)", QString("D1:%1").arg(right)); // 获取频率设置范围
+            QVariant vars = firstLine->property("Value2"); // 获取第一行设置的频率值,是个二维数组
+            QVariantList freList = vars.toList(); // 转化为一维数组
+            int freListRowCount = freList.size();
+            if (freListRowCount != 1) { // 因为只取第一行的频率值，若freList的size不等于一，则为错误，抛出异常
+                throw QException();
+            }
+            res = freList[0].toList();
+
+        } catch (QException ex) {
+            closeExcel(excelwu, workbookwu);
+            QMessageBox::information(this, "唤醒灵敏度测试", "取频率值错误");
+        }
+
+        // 开始补充excel表格里最新一行的芯片信息
+        int cur_col = 1; // 当前处理的列
+        int cur_row = rowCount + 1; // 当前处理的行
+        cellA = worksheetwu->querySubObject("Cells(int, int)", cur_row, cur_col);
+        cur_col++;
+        cellA->dynamicCall("SetValue(const QVariant&)", ui->EditBoardWu->text());
+        cellA = worksheetwu->querySubObject("Cells(int, int)", cur_row, cur_col);
+        cur_col++;
+        cellA->dynamicCall("SetValue(const QVariant&)", ui->tb_originalPackage->text());
+        cellA = worksheetwu->querySubObject("Cells(int, int)", cur_row, cur_col);
+        cur_col++;
+        cellA->dynamicCall("SetValue(const QVariant&)", ui->tb_L0Wu->text());
+
+        for (int i  = 0; i < res.size(); i++) {
+            bool setFre_result = ptr_N5172B->SetFre(QString::number(res[i].toDouble())); // 信号发生器设置信号
+            if (!setFre_result) {
+                closeExcel(excelwu, workbookwu);
+                QMessageBox::warning(this, "矢量信号发生器", "频率设置错误");
+                return;
+            }
+            for (int ampl = -99; ampl <= 19; ampl += 10) {
+                bool setAmpl_result = ptr_N5172B->SetAmpl(QString::number(ampl));
+                if (!setAmpl_result) {
+                    closeExcel(excelwu, workbookwu);
+                    QMessageBox::warning(this, "矢量信号发生器", "功率设置错误");
+                    return;
+                }
+                Delay_MSec(500);
+                char* str_result = ptr_D7254->viop_DPOQueValueMean(); // 获取数字荧光示波器上的high值-返回值是字符串形式
+                double result = QString(str_result).toDouble();
+                if (result > 1.0) { // 如果上界为高值（此处不考虑波动情况）
+                    int j = ampl - 9; // 计算下界
+                    // 小范围精准测试
+                    for (; j <= ampl; ++j) {
+                        bool setAmpl_result = ptr_N5172B->SetAmpl(QString::number(j));
+                        if (!setAmpl_result) {
+                            closeExcel(excelwu, workbookwu);
+                            QMessageBox::warning(this, "矢量信号发生器", "功率设置错误");
+                            return;
+                        }
+                        Delay_MSec(500);
+                        char* str_result = ptr_D7254->viop_DPOQueValueMean(); // 获取数字荧光示波器上的high值-返回值是字符串形式
+                        double imme_res = QString(str_result).toDouble();
+                        if (imme_res > 1.0) {
+                            // 波动测试
+                            double value = imme_res;
+                            int k = 0;
+                            for (; k < 3; ++k) {
+                                Delay_MSec(300);
+                                char* str_result = ptr_D7254->viop_DPOQueValueMean(); // 获取数字荧光示波器上的high值-返回值是字符串形式
+                                double tmp = QString(str_result).toDouble();
+                                if ((value < 1.0 && tmp > 1.0) || (value > 1.0 && tmp < 1.0)) { // 如果上一个值和当前值不满足要求
+                                    break; // 继续小范围遍历ampl
+                                }
+                            }
+                            if (k == 4) {
+                                cellA = worksheetwu->querySubObject("Cells(int, int)", cur_row, cur_col);
+                                cur_col++;
+                                cellA->dynamicCall("SetValue(const QVariant&)", j); // 赋值
+                                break;
+                            }
+                        } // if imme_res > 1.0
+                    } // for j <= ampl
+                    if (j == ampl + 1) { // 当前小范围不满足，超过了小范围的上界
+                        for (; j <= ampl + 9; ++j) { // 继续下一范围
+                            bool setAmpl_result = ptr_N5172B->SetAmpl(QString::number(j));
+                            if (!setAmpl_result) {
+                                closeExcel(excelwu, workbookwu);
+                                QMessageBox::warning(this, "矢量信号发生器", "功率设置错误");
+                                return;
+                            }
+                            Delay_MSec(500);
+                            char* str_result = ptr_D7254->viop_DPOQueValueMean(); // 获取数字荧光示波器上的high值-返回值是字符串形式
+                            double imme_res = QString(str_result).toDouble();
+                            if (imme_res > 1.0) {
+                                // 波动测试
+                                double value = imme_res;
+                                int k = 0;
+                                for (; k < 3; ++k) {
+                                    Delay_MSec(300);
+                                    char* str_result = ptr_D7254->viop_DPOQueValueMean(); // 获取数字荧光示波器上的high值-返回值是字符串形式
+                                    double tmp = QString(str_result).toDouble();
+                                    if ((value < 1.0 && tmp > 1.0) || (value > 1.0 && tmp < 1.0)) { // 如果上一个值和当前值不满足要求
+                                        break; // 继续小范围遍历ampl
+                                    }
+                                }
+                                if (k == 4) {
+                                    cellA = worksheetwu->querySubObject("Cells(int, int)", cur_row, cur_col);
+                                    cur_col++;
+                                    cellA->dynamicCall("SetValue(const QVariant&)", j); // 赋值
+                                    break;
+                                }
+                            } // if imme_res > 1.0
+                        } // for <= ampl + 9
+                        if (j == ampl + 10) { // 超出第二小范围的测试范围
+                            cellA = worksheetwu->querySubObject("Cells(int, int)", cur_row, cur_col);
+                            cur_col++;
+                            cellA->dynamicCall("SetValue(const QVariant&)", "xHigh"); // 赋值
+                        }
+                    } // j == ampl + 1
+                    break;
+                } // if result > 1.0
+            } // for ampl <= 19
+        } // i < res.size()
+        closeExcel(excelwu, workbookwu);
+        QMessageBox::information(this, "唤醒灵敏度测试", "测试完毕");
+    });
 
 
 
@@ -601,265 +943,265 @@ MainWindow::MainWindow(QWidget *parent) :
 
     //AM   ON/OF
     connect(ui->btnAMOnOff,&QPushButton::clicked,[&](){
-      if(isAMOn)
-      {
-         ptr_N5172B->viop_AMONOFF(isAMOn);
-         isAMOn=false;
-      }
-      else
-      {
-          ptr_N5172B->viop_AMONOFF(isAMOn);
-          isAMOn=true;
-      }
+        if(isAMOn)
+        {
+            ptr_N5172B->viop_AMONOFF(isAMOn);
+            isAMOn=false;
+        }
+        else
+        {
+            ptr_N5172B->viop_AMONOFF(isAMOn);
+            isAMOn=true;
+        }
     });
 
     //打开串口并配置文件
     //检测串口
-      connect(ui->btnDect,&QPushButton::clicked,[&]()
-      {
-          ui->cbxComPort->clear();
-          foreach (const QSerialPortInfo &info,QSerialPortInfo::availablePorts())
-             {
-                 QSerialPort serial;
-                 serial.setPort(info);
-                 if(serial.open(QIODevice::ReadWrite))
-                 {
-                      ui->cbxComPort->addItem(serial.portName());
-                      serial.close();
-                 }
-             }
-       });
-
-      //打开串口
-      connect(ui->btnOpen,&QPushButton::clicked,[&]()
-     {
-         QString open ="打开串口";
-         QString close="关闭串口";
-
-         /* 先来判断对象是不是为空 */
-            if(serial == nullptr)
+    connect(ui->btnDect,&QPushButton::clicked,[&]()
+    {
+        ui->cbxComPort->clear();
+        foreach (const QSerialPortInfo &info,QSerialPortInfo::availablePorts())
+        {
+            QSerialPort serial;
+            serial.setPort(info);
+            if(serial.open(QIODevice::ReadWrite))
             {
-                /* 新建串口对象 */
-               serial  = new QSerialPort();
+                ui->cbxComPort->addItem(serial.portName());
+                serial.close();
             }
-            /* 判断是要打开串口，还是关闭串口 */
-            if(serial ->isOpen())
+        }
+    });
+
+    //打开串口
+    connect(ui->btnOpen,&QPushButton::clicked,[&]()
+    {
+        QString open ="打开串口";
+        QString close="关闭串口";
+
+        /* 先来判断对象是不是为空 */
+        if(serial == nullptr)
+        {
+            /* 新建串口对象 */
+            serial  = new QSerialPort();
+        }
+        /* 判断是要打开串口，还是关闭串口 */
+        if(serial ->isOpen())
+        {
+            /* 串口已经打开，现在来关闭串口 */
+            ui->btnOpen->setText(open);
+            serial ->close();
+            QMessageBox::information(this,"提示","串口已关闭");
+        }
+        else
+        {
+            /* 判断是否有可用串口 */
+            if(ui->cbxComPort->count() != 0)
             {
-                /* 串口已经打开，现在来关闭串口 */
-               ui->btnOpen->setText(open);
-               serial ->close();
-               QMessageBox::information(this,"提示","串口已关闭");
+                /* 串口已经关闭，现在来打开串口 */
+                /* 设置串口名称 */
+                serial->setPortName(ui->cbxComPort->currentText());
+                /* 设置波特率 */
+                serial ->setBaudRate(115200);
+                /* 设置数据位数 */
+                serial ->setDataBits(QSerialPort::Data8);
+                /* 设置停止位 */
+                serial ->setStopBits(QSerialPort::OneStop);
+                /* 设置奇偶校验 */
+                serial ->setParity(QSerialPort::NoParity);
+                /* 设置流控制 */
+                serial ->setFlowControl(QSerialPort::NoFlowControl);
+                /* 打开串口 */
+                serial ->open(QIODevice::ReadWrite);
+                /* 设置串口缓冲区大小，这里必须设置为这么大 */
+                serial ->setReadBufferSize(PortOneFrameSize);
+                ui->btnOpen->setText(close);
+                QMessageBox::information(this,"提示","串口已打开");
             }
             else
             {
-                /* 判断是否有可用串口 */
-                if(ui->cbxComPort->count() != 0)
-                {
-                    /* 串口已经关闭，现在来打开串口 */
-                    /* 设置串口名称 */
-                   serial->setPortName(ui->cbxComPort->currentText());
-                    /* 设置波特率 */
-                   serial ->setBaudRate(115200);
-                    /* 设置数据位数 */
-                   serial ->setDataBits(QSerialPort::Data8);
-                   /* 设置停止位 */
-                   serial ->setStopBits(QSerialPort::OneStop);
-                    /* 设置奇偶校验 */
-                   serial ->setParity(QSerialPort::NoParity);
-                    /* 设置流控制 */
-                   serial ->setFlowControl(QSerialPort::NoFlowControl);
-                    /* 打开串口 */
-                   serial ->open(QIODevice::ReadWrite);
-                    /* 设置串口缓冲区大小，这里必须设置为这么大 */
-                   serial ->setReadBufferSize(PortOneFrameSize);
-                   ui->btnOpen->setText(close);
-                   QMessageBox::information(this,"提示","串口已打开");
-                }
-                else
-                {
-                       // 警告对话框
-                   QMessageBox::warning(this,tr("警告"),tr("没有可用串口，请重新尝试扫描串口！"),QMessageBox::Ok);}
-                }
-      });
+                // 警告对话框
+                QMessageBox::warning(this,tr("警告"),tr("没有可用串口，请重新尝试扫描串口！"),QMessageBox::Ok);}
+        }
+    });
 
-      //  enable chip
-      connect(ui->btnEnChip,&QPushButton::clicked,[&](){
-          if(ui->cbxComPort->count() != 0)
-          {
-           int tempchip=0xff;
-           QString ss;
-           ss=QString::number(tempchip);
-           QByteArray tempChip=ss.toLatin1();
-           serial->write(tempChip);
-          }
-          else
-          {
-          QMessageBox::warning(this,tr("警告"),tr("没有打开串口，请打开串口！"),QMessageBox::Ok);
-          }
-      });
+    //  enable chip
+    connect(ui->btnEnChip,&QPushButton::clicked,[&](){
+        if(ui->cbxComPort->count() != 0)
+        {
+            int tempchip=0xff;
+            QString ss;
+            ss=QString::number(tempchip);
+            QByteArray tempChip=ss.toLatin1();
+            serial->write(tempChip);
+        }
+        else
+        {
+            QMessageBox::warning(this,tr("警告"),tr("没有打开串口，请打开串口！"),QMessageBox::Ok);
+        }
+    });
 
-      //   enable spi
-      connect(ui->btnEnSPI,&QPushButton::clicked,[&]()
-      {
-          if(ui->cbxComPort->count() != 0){
-          if(EnSpiDsrc_HI==false)
-          {
-          int tempchip=0xbf;
-          QString ss;
-          ss=QString::number(tempchip);
-          QByteArray tempChip=ss.toLatin1();
-          serial->write(tempChip);
-          EnSpiDsrc_HI=true;
-          }
-          else
-           {
-              int tempchip=0xaf;
-              QString ss;
-              ss=QString::number(tempchip);
-              QByteArray tempChip=ss.toLatin1();
-              serial->write(tempChip);
-              EnSpiDsrc_HI=false;
-           }
-          }
-          else
-          {
-           QMessageBox::warning(this,tr("警告"),tr("没有打开串口，请打开串口！"),QMessageBox::Ok);
-          }
-      });
+    //   enable spi
+    connect(ui->btnEnSPI,&QPushButton::clicked,[&]()
+    {
+        if(ui->cbxComPort->count() != 0){
+            if(EnSpiDsrc_HI==false)
+            {
+                int tempchip=0xbf;
+                QString ss;
+                ss=QString::number(tempchip);
+                QByteArray tempChip=ss.toLatin1();
+                serial->write(tempChip);
+                EnSpiDsrc_HI=true;
+            }
+            else
+            {
+                int tempchip=0xaf;
+                QString ss;
+                ss=QString::number(tempchip);
+                QByteArray tempChip=ss.toLatin1();
+                serial->write(tempChip);
+                EnSpiDsrc_HI=false;
+            }
+        }
+        else
+        {
+            QMessageBox::warning(this,tr("警告"),tr("没有打开串口，请打开串口！"),QMessageBox::Ok);
+        }
+    });
 
-      //读取文件并发送
-      connect(ui->btnSend,&QPushButton::clicked,[&]()
-      {
-          QString filepath;
-          filepath =QFileDialog::getOpenFileName(this,("选择文件"),("C:/Users/ztp/Desktop"),("*.txt")); //获取保存路径
-          QFile file(filepath);
-          if(filepath.isEmpty())
-          {
-              QMessageBox::critical(this, "错误信息", "没有选择文件");
-                  return;
-          }
+    //读取文件并发送
+    connect(ui->btnSend,&QPushButton::clicked,[&]()
+    {
+        QString filepath;
+        filepath =QFileDialog::getOpenFileName(this,("选择文件"),("C:/Users/ztp/Desktop"),("*.txt")); //获取保存路径
+        QFile file(filepath);
+        if(filepath.isEmpty())
+        {
+            QMessageBox::critical(this, "错误信息", "没有选择文件");
+            return;
+        }
 
-          //打开txt
-          if(!file.open(QIODevice::ReadOnly | QIODevice::Text))                                                         //只读 文本文档
-          {
-             QMessageBox::information(this,"警告","无法打开文件");
-          }
-          while(!file.atEnd())                                                                                          //没有读到最后一行
-          {
-              QByteArray line = file.readLine();
-              QString str(line);
-              QStringList s=str.split(" ");
-              QString  a1= s[0];
-              QString  b=binTohex(s[1]);                     //二进制转十六进制
-              QString  c=binTohex1(s[2]);
-              QString a2;
-              QString firOpera="00";
-               for(int i=2;i<4;i++)
-              {
-                  a2.append(a1[i]);
-              }
-              b.append(c);
-              a2.append(b);
-              firOpera.append(a2);
-              QByteArray qByteArray=QByteArray::fromHex(firOpera.toLatin1().data());
-              serial->write(qByteArray);
-              a1="";
-              b="";
-              c="";
-              a2="";
-              Delay_MSec(30);
-          }
-             file.close();
-          QMessageBox::information(this,"信息","配置完成");
-      });
+        //打开txt
+        if(!file.open(QIODevice::ReadOnly | QIODevice::Text))                                                         //只读 文本文档
+        {
+            QMessageBox::information(this,"警告","无法打开文件");
+        }
+        while(!file.atEnd())                                                                                          //没有读到最后一行
+        {
+            QByteArray line = file.readLine();
+            QString str(line);
+            QStringList s=str.split(" ");
+            QString  a1= s[0];
+            QString  b=binTohex(s[1]);                     //二进制转十六进制
+            QString  c=binTohex1(s[2]);
+            QString a2;
+            QString firOpera="00";
+            for(int i=2;i<4;i++)
+            {
+                a2.append(a1[i]);
+            }
+            b.append(c);
+            a2.append(b);
+            firOpera.append(a2);
+            QByteArray qByteArray=QByteArray::fromHex(firOpera.toLatin1().data());
+            serial->write(qByteArray);
+            a1="";
+            b="";
+            c="";
+            a2="";
+            Delay_MSec(30);
+        }
+        file.close();
+        QMessageBox::information(this,"信息","配置完成");
+    });
 
-      //Rx带宽测试
-     connect(ui->RxFreRange,&QPushButton::clicked,[&]()
-      {
-         //设置信号源
-         ToalBits=ui->EditTolBits->text();
-         ptr_N5172B->VIOpSignalGenerator::viop_realtimeOn();                  //realtime
-         ptr_N5172B->VIOpSignalGenerator::viop_modulationType();              //设置ASK
-         ptr_N5172B->VIOpSignalGenerator::viop_alpha();                       //设置阿尔法为1
-         ptr_N5172B->VIOpSignalGenerator::viop_alphaDepth();                  //85%
-         ptr_N5172B->VIOpSignalGenerator::viop_symbolRate(512);               //symbol rate 默认单位Ksps
-         ptr_N5172B->VIOpSignalGenerator::viop_loadData();                    //load文件PN9-1FF-FM0
-         ptr_N5172B->VIOpSignalGenerator::viop_displayMode(SCIENTIFIC);       //科学计数法显示误码率
-         ptr_N5172B->VIOpSignalGenerator::viop_BERTtriggerSource(IMM);        //trigger-immediate
-         ptr_N5172B->VIOpSignalGenerator::viop_totalBit(ToalBits);            //设置totalBit为1千万
-         ptr_N5172B->VIOpSignalGenerator::viop_MODOn();
-         ptr_N5172B->VIOpSignalGenerator::viop_RFOn();                         //打开RF
-         ptr_N5172B->VIOpSignalGenerator::viop_bertOn();                       //打开
+    //Rx带宽测试
+    connect(ui->RxFreRange,&QPushButton::clicked,[&]()
+    {
+        //设置信号源
+        ToalBits=ui->EditTolBits->text();
+        ptr_N5172B->VIOpSignalGenerator::viop_realtimeOn();                  //realtime
+        ptr_N5172B->VIOpSignalGenerator::viop_modulationType();              //设置ASK
+        ptr_N5172B->VIOpSignalGenerator::viop_alpha();                       //设置阿尔法为1
+        ptr_N5172B->VIOpSignalGenerator::viop_alphaDepth();                  //85%
+        ptr_N5172B->VIOpSignalGenerator::viop_symbolRate(512);               //symbol rate 默认单位Ksps
+        ptr_N5172B->VIOpSignalGenerator::viop_loadData();                    //load文件PN9-1FF-FM0
+        ptr_N5172B->VIOpSignalGenerator::viop_displayMode(SCIENTIFIC);       //科学计数法显示误码率
+        ptr_N5172B->VIOpSignalGenerator::viop_BERTtriggerSource(IMM);        //trigger-immediate
+        ptr_N5172B->VIOpSignalGenerator::viop_totalBit(ToalBits);            //设置totalBit为1千万
+        ptr_N5172B->VIOpSignalGenerator::viop_MODOn();
+        ptr_N5172B->VIOpSignalGenerator::viop_RFOn();                         //打开RF
+        ptr_N5172B->VIOpSignalGenerator::viop_bertOn();                       //打开
 
-         //  根据实际赋值
-         double freUp=ui->RxRangeFreUp->text().toDouble();
-         double freDown=ui->RxRangeFreDown->text().toDouble();
-         double freStep=ui->RxRangStep->text().toDouble()/1000000;
-//         qDebug()<<freUp;
-//         qDebug()<<freDown;
-//         qDebug()<<freStep;
+        //  根据实际赋值
+        double freUp=ui->RxRangeFreUp->text().toDouble();
+        double freDown=ui->RxRangeFreDown->text().toDouble();
+        double freStep=ui->RxRangStep->text().toDouble()/1000000;
+        //         qDebug()<<freUp;
+        //         qDebug()<<freDown;
+        //         qDebug()<<freStep;
 
 
-         BerStand=ui->EditBer->text().toDouble();   //误码率
+        BerStand=ui->EditBer->text().toDouble();   //误码率
 
-         //选择文件
-         QString filepath;
-         filepath =QFileDialog::getOpenFileName(nullptr,("选择文件"),("C:/Users/ztp/Desktop"),("*.xls *.xlsx *.csv")); //获取保存路径
-         if(filepath.isEmpty())
-         {
-             QMessageBox::critical(nullptr, "错误信息", "没有找到EXCEL");
-                 return;
-         }
+        //选择文件
+        QString filepath;
+        filepath =QFileDialog::getOpenFileName(nullptr,("选择文件"),("C:/Users/ztp/Desktop"),("*.xls *.xlsx *.csv")); //获取保存路径
+        if(filepath.isEmpty())
+        {
+            QMessageBox::critical(nullptr, "错误信息", "没有找到EXCEL");
+            return;
+        }
 
-         QAxObject *excel = new QAxObject();
-         excel->setControl("ket.Application");                                     //连接WPS
-         excel->dynamicCall("SetVisible(bool Visible)","false");                   //不显示窗体
-         excel->setProperty("DisplayAlerts", false);                               //不显示任何警告信息。如果为true那么在关闭是会出现类似“文件已修改，是否保存”的提示
-         QAxObject* workbooks = excel->querySubObject("WorkBooks");                //获取工作簿集合
-         workbooks->dynamicCall("Open(const QString&)",filepath);                  //打开打开已存在的工作簿
-         QAxObject *workbook = excel->querySubObject("ActiveWorkBook");            //获取当前工作簿
-         QAxObject *worksheets = workbook->querySubObject("WorkSheets");           //获取工作表集合
-         QAxObject *worksheet = worksheets->querySubObject("Item(int)",1);         //获取工作表集合的工作表1，即sheet1
-         QAxObject *cellA1;
+        QAxObject *excel = new QAxObject();
+        excel->setControl("ket.Application");                                     //连接WPS
+        excel->dynamicCall("SetVisible(bool Visible)","false");                   //不显示窗体
+        excel->setProperty("DisplayAlerts", false);                               //不显示任何警告信息。如果为true那么在关闭是会出现类似“文件已修改，是否保存”的提示
+        QAxObject* workbooks = excel->querySubObject("WorkBooks");                //获取工作簿集合
+        workbooks->dynamicCall("Open(const QString&)",filepath);                  //打开打开已存在的工作簿
+        QAxObject *workbook = excel->querySubObject("ActiveWorkBook");            //获取当前工作簿
+        QAxObject *worksheets = workbook->querySubObject("WorkSheets");           //获取工作表集合
+        QAxObject *worksheet = worksheets->querySubObject("Item(int)",1);         //获取工作表集合的工作表1，即sheet1
+        QAxObject *cellA1;
 
-         if(RxFreRange)
-         {
-              cellA1 = worksheet->querySubObject("Cells(int,int)",1,1);
-              cellA1->dynamicCall("SetValue(const QVariant&)","Rx带宽测试");         //写入数据
-              cellA1->setProperty("HorizontalAlignment", -4108);                     //居中
-              cellA1->setProperty("VerticalAlignment", -4108);                       //居中
-             RxFreRange=false;
-         }
+        if(RxFreRange)
+        {
+            cellA1 = worksheet->querySubObject("Cells(int,int)",1,1);
+            cellA1->dynamicCall("SetValue(const QVariant&)","Rx带宽测试");         //写入数据
+            cellA1->setProperty("HorizontalAlignment", -4108);                     //居中
+            cellA1->setProperty("VerticalAlignment", -4108);                       //居中
+            RxFreRange=false;
+        }
 
-         //写入芯片号
-         int tempRxAmpl=ui->RxRangePoint->text().toInt()+6;
-         QString textLab=QString::number(tempRxAmpl)+"dBm "+ui->RxRangStep->text()+"KHz";
-         textLab=ui->EditBoard->text()+"号 "+textLab;
-         cellA1= worksheet->querySubObject("Cells(int,int)",row++,1);
-         cellA1->dynamicCall("SetValue(const QVariant&)",textLab);                   //写入板号
-         cellA1->setProperty("HorizontalAlignment", -4108);                          //居中
-         cellA1->setProperty("VerticalAlignment", -4108);                            //居中
-         int colum=2;
+        //写入芯片号
+        int tempRxAmpl=ui->RxRangePoint->text().toInt()+6;
+        QString textLab=QString::number(tempRxAmpl)+"dBm "+ui->RxRangStep->text()+"KHz";
+        textLab=ui->EditBoard->text()+"号 "+textLab;
+        cellA1= worksheet->querySubObject("Cells(int,int)",row++,1);
+        cellA1->dynamicCall("SetValue(const QVariant&)",textLab);                   //写入板号
+        cellA1->setProperty("HorizontalAlignment", -4108);                          //居中
+        cellA1->setProperty("VerticalAlignment", -4108);                            //居中
+        int colum=2;
 
-         // 第二行数据进行操作
-         cellA1 = worksheet->querySubObject("Cells(int,int)",row++,1);
-         cellA1->dynamicCall("SetValue(const QVariant&)","频率(GHz)");         //写入功率
-         cellA1->setProperty("HorizontalAlignment", -4108);                   //居中
-         cellA1->setProperty("VerticalAlignment", -4108);                     //居中
-         cellA1 = worksheet->querySubObject("Cells(int,int)",row++,1);
-         cellA1->dynamicCall("SetValue(const QVariant&)","误码率");             //写入误码率
-         cellA1->setProperty("HorizontalAlignment", -4108);                    //居中
-         cellA1->setProperty("VerticalAlignment", -4108);                      //居中
-         cellA1 = worksheet->querySubObject("Cells(int,int)",row,1);
-         cellA1->dynamicCall("SetValue(const QVariant&)","结果");               //写入结果
-         cellA1->setProperty("HorizontalAlignment", -4108);                    //居中
-         cellA1->setProperty("VerticalAlignment", -4108);                      //居中
+        // 第二行数据进行操作
+        cellA1 = worksheet->querySubObject("Cells(int,int)",row++,1);
+        cellA1->dynamicCall("SetValue(const QVariant&)","频率(GHz)");         //写入功率
+        cellA1->setProperty("HorizontalAlignment", -4108);                   //居中
+        cellA1->setProperty("VerticalAlignment", -4108);                     //居中
+        cellA1 = worksheet->querySubObject("Cells(int,int)",row++,1);
+        cellA1->dynamicCall("SetValue(const QVariant&)","误码率");             //写入误码率
+        cellA1->setProperty("HorizontalAlignment", -4108);                    //居中
+        cellA1->setProperty("VerticalAlignment", -4108);                      //居中
+        cellA1 = worksheet->querySubObject("Cells(int,int)",row,1);
+        cellA1->dynamicCall("SetValue(const QVariant&)","结果");               //写入结果
+        cellA1->setProperty("HorizontalAlignment", -4108);                    //居中
+        cellA1->setProperty("VerticalAlignment", -4108);                      //居中
 
-         //
-         ptr_N5172B->VIOpSignalGenerator::SetAmpl(QString::number(tempRxAmpl));     //输入ampl
-             //功率循环
-          for(;freDown<=freUp;freDown+=freStep)
-          {
+        //
+        ptr_N5172B->VIOpSignalGenerator::SetAmpl(QString::number(tempRxAmpl));     //输入ampl
+        //功率循环
+        for(;freDown<=freUp;freDown+=freStep)
+        {
             ptr_N5172B->VIOpSignalGenerator::SetFre(QString::number(freDown));//设置频率
             Delay_MSec(100);
             ptr_N5172B->VIOpSignalGenerator::viop_bertOff();                         //关闭bert
@@ -870,7 +1212,7 @@ MainWindow::MainWindow(QWidget *parent) :
             str_BER = QString(result);	               //得到bert测试下 ber的值 根据测试要求这个值小于10的负五次方的话为合格
             double strBER=str_BER.toDouble();
 
-                 //写入excel
+            //写入excel
             cellA1 = worksheet->querySubObject("Cells(int,int)",row-2,colum);
             cellA1->dynamicCall("SetValue(const QVariant&)",QString::number(freDown));   //写入频率
             cellA1->setProperty("HorizontalAlignment", -4108);           //居中
@@ -883,44 +1225,44 @@ MainWindow::MainWindow(QWidget *parent) :
 
             if(strBER<=BerStand)
             {
-                    cellA1 = worksheet->querySubObject("Cells(int,int)",row,colum);
-                    cellA1->dynamicCall("SetValue(const QVariant&)","T");   //写入结果
-                    cellA1->setProperty("HorizontalAlignment", -4108);         //居中
-                    cellA1->setProperty("VerticalAlignment", -4108);           //居中
-             }
+                cellA1 = worksheet->querySubObject("Cells(int,int)",row,colum);
+                cellA1->dynamicCall("SetValue(const QVariant&)","T");   //写入结果
+                cellA1->setProperty("HorizontalAlignment", -4108);         //居中
+                cellA1->setProperty("VerticalAlignment", -4108);           //居中
+            }
             if(strBER>BerStand)
             {
-             cellA1 = worksheet->querySubObject("Cells(int,int)",row,colum);
-             cellA1->dynamicCall("SetValue(const QVariant&)","F");    //写入结果
-//           QAxObject *font = cellA1->querySubObject("Font");            //获取单元格字体
-//           font->setProperty("Bold", "true");                        //设置单元格字体颜色（红色）
-//           font->setProperty("Color", QColor(255, 0, 0));               //设置单元格字体颜色（红色）
-             cellA1->setProperty("HorizontalAlignment", -4108);           //居中
-            cellA1->setProperty("VerticalAlignment", -4108);             //居中
-             }
-                 colum++;
-           }
-         colum=2;
-         row++;
-         ui->lineEdit_Row->setText(QString::number(row));
-         //芯片号增加
-         chipNum=ui->EditBoard->text().toInt();
-         chipNum++;
-         ui->EditBoard->setText(QString::number(chipNum));   //显示下一个芯片号
-         free(result);
-         //关闭文件
-         workbook->dynamicCall("SaveAs(const QString&)",QDir::toNativeSeparators(filepath));
-         workbook->dynamicCall("Close()");                               //关闭工作簿
-         excel->dynamicCall("Quit()");                                   //关闭excel
-         delete excel;
-         excel=nullptr;
+                cellA1 = worksheet->querySubObject("Cells(int,int)",row,colum);
+                cellA1->dynamicCall("SetValue(const QVariant&)","F");    //写入结果
+                //           QAxObject *font = cellA1->querySubObject("Font");            //获取单元格字体
+                //           font->setProperty("Bold", "true");                        //设置单元格字体颜色（红色）
+                //           font->setProperty("Color", QColor(255, 0, 0));               //设置单元格字体颜色（红色）
+                cellA1->setProperty("HorizontalAlignment", -4108);           //居中
+                cellA1->setProperty("VerticalAlignment", -4108);             //居中
+            }
+            colum++;
+        }
+        colum=2;
+        row++;
+        ui->lineEdit_Row->setText(QString::number(row));
+        //芯片号增加
+        chipNum=ui->EditBoard->text().toInt();
+        chipNum++;
+        ui->EditBoard->setText(QString::number(chipNum));   //显示下一个芯片号
+        free(result);
+        //关闭文件
+        workbook->dynamicCall("SaveAs(const QString&)",QDir::toNativeSeparators(filepath));
+        workbook->dynamicCall("Close()");                               //关闭工作簿
+        excel->dynamicCall("Quit()");                                   //关闭excel
+        delete excel;
+        excel=nullptr;
         QMessageBox::information(this,"RX带宽测试","完成");
-      });
+    });
 
 
-     //Rx带宽测试-多灵敏度
+    //Rx带宽测试-多灵敏度
     connect(ui->RxFreRangeMul,&QPushButton::clicked,[&]()
-     {
+    {
         //设置信号源
         ToalBits=ui->EditTolBits->text();
         ptr_N5172B->VIOpSignalGenerator::viop_realtimeOn();                  //realtime
@@ -944,9 +1286,9 @@ MainWindow::MainWindow(QWidget *parent) :
         int amplDown=ui->RxRangePoint->text().toInt()+6;            //功率下限,自动+6
         int amplStep=ui->RxRangeAmplStep->text().toInt();         //功率步长
 
-//         qDebug()<<freUp;
-//         qDebug()<<freDown;
-//         qDebug()<<freStep;
+        //         qDebug()<<freUp;
+        //         qDebug()<<freDown;
+        //         qDebug()<<freStep;
 
 
         BerStand=ui->EditBer->text().toDouble();   //误码率
@@ -957,7 +1299,7 @@ MainWindow::MainWindow(QWidget *parent) :
         if(filepath.isEmpty())
         {
             QMessageBox::critical(nullptr, "错误信息", "没有找到EXCEL");
-                return;
+            return;
         }
 
         QAxObject *excel = new QAxObject();
@@ -973,84 +1315,84 @@ MainWindow::MainWindow(QWidget *parent) :
 
         if(RxFreRangeMul)
         {
-             cellA1 = worksheet->querySubObject("Cells(int,int)",1,1);
-             cellA1->dynamicCall("SetValue(const QVariant&)","Rx带宽测试-灵敏度上下限");         //写入数据
-             cellA1->setProperty("HorizontalAlignment", -4108);                     //居中
-             cellA1->setProperty("VerticalAlignment", -4108);                       //居中
+            cellA1 = worksheet->querySubObject("Cells(int,int)",1,1);
+            cellA1->dynamicCall("SetValue(const QVariant&)","Rx带宽测试-灵敏度上下限");         //写入数据
+            cellA1->setProperty("HorizontalAlignment", -4108);                     //居中
+            cellA1->setProperty("VerticalAlignment", -4108);                       //居中
             RxFreRangeMul=false;
         }
 
 
-      for(;amplDown<=amplUp;amplDown+=amplStep)
-      {
-          //写入芯片号
-          QString textLab=QString::number(amplDown)+"dBm";
-          textLab=ui->EditBoard->text()+"号 "+textLab;
-          cellA1= worksheet->querySubObject("Cells(int,int)",row++,1);
-          cellA1->dynamicCall("SetValue(const QVariant&)",textLab);                   //写入板号
-          cellA1->setProperty("HorizontalAlignment", -4108);                          //居中
-          cellA1->setProperty("VerticalAlignment", -4108);                            //居中
-          int colum=2;
+        for(;amplDown<=amplUp;amplDown+=amplStep)
+        {
+            //写入芯片号
+            QString textLab=QString::number(amplDown)+"dBm";
+            textLab=ui->EditBoard->text()+"号 "+textLab;
+            cellA1= worksheet->querySubObject("Cells(int,int)",row++,1);
+            cellA1->dynamicCall("SetValue(const QVariant&)",textLab);                   //写入板号
+            cellA1->setProperty("HorizontalAlignment", -4108);                          //居中
+            cellA1->setProperty("VerticalAlignment", -4108);                            //居中
+            int colum=2;
 
-          // 第二行数据进行操作
-          cellA1 = worksheet->querySubObject("Cells(int,int)",row++,1);
-          cellA1->dynamicCall("SetValue(const QVariant&)","频率(GHz)");         //写入功率
-          cellA1->setProperty("HorizontalAlignment", -4108);                   //居中
-          cellA1->setProperty("VerticalAlignment", -4108);                     //居中
-          cellA1 = worksheet->querySubObject("Cells(int,int)",row++,1);
-          cellA1->dynamicCall("SetValue(const QVariant&)","误码率");             //写入误码率
-          cellA1->setProperty("HorizontalAlignment", -4108);                    //居中
-          cellA1->setProperty("VerticalAlignment", -4108);                      //居中
-          cellA1 = worksheet->querySubObject("Cells(int,int)",row,1);
-          cellA1->dynamicCall("SetValue(const QVariant&)","结果");               //写入结果
-          cellA1->setProperty("HorizontalAlignment", -4108);                    //居中
-          cellA1->setProperty("VerticalAlignment", -4108);                      //居中
-          //
-          ptr_N5172B->VIOpSignalGenerator::SetAmpl(QString::number(amplDown));     //输入ampl
-              //功率循环
-           for(;freDown<=freUp;freDown+=freStep)
-           {
-             ptr_N5172B->VIOpSignalGenerator::SetFre(QString::number(freDown));//设置频率
-             Delay_MSec(100);
-             ptr_N5172B->VIOpSignalGenerator::viop_bertOff();                         //关闭bert
-             ptr_N5172B->VIOpSignalGenerator::viop_bertOn();                          //打开bert
-             Delay_MSec(2000);                                                        //延时约4秒等待BER稳定
-             //返回BERT结果
-             result = ptr_N5172B ->viop_Q_BertResult1();                               //调用viop_Q_BertResult()函数，得到bert测试各项结果的值
-             str_BER = QString(result);	               //得到bert测试下 ber的值 根据测试要求这个值小于10的负五次方的话为合格
-             double strBER=str_BER.toDouble();
+            // 第二行数据进行操作
+            cellA1 = worksheet->querySubObject("Cells(int,int)",row++,1);
+            cellA1->dynamicCall("SetValue(const QVariant&)","频率(GHz)");         //写入功率
+            cellA1->setProperty("HorizontalAlignment", -4108);                   //居中
+            cellA1->setProperty("VerticalAlignment", -4108);                     //居中
+            cellA1 = worksheet->querySubObject("Cells(int,int)",row++,1);
+            cellA1->dynamicCall("SetValue(const QVariant&)","误码率");             //写入误码率
+            cellA1->setProperty("HorizontalAlignment", -4108);                    //居中
+            cellA1->setProperty("VerticalAlignment", -4108);                      //居中
+            cellA1 = worksheet->querySubObject("Cells(int,int)",row,1);
+            cellA1->dynamicCall("SetValue(const QVariant&)","结果");               //写入结果
+            cellA1->setProperty("HorizontalAlignment", -4108);                    //居中
+            cellA1->setProperty("VerticalAlignment", -4108);                      //居中
+            //
+            ptr_N5172B->VIOpSignalGenerator::SetAmpl(QString::number(amplDown));     //输入ampl
+            //功率循环
+            for(;freDown<=freUp;freDown+=freStep)
+            {
+                ptr_N5172B->VIOpSignalGenerator::SetFre(QString::number(freDown));//设置频率
+                Delay_MSec(100);
+                ptr_N5172B->VIOpSignalGenerator::viop_bertOff();                         //关闭bert
+                ptr_N5172B->VIOpSignalGenerator::viop_bertOn();                          //打开bert
+                Delay_MSec(2000);                                                        //延时约4秒等待BER稳定
+                //返回BERT结果
+                result = ptr_N5172B ->viop_Q_BertResult1();                               //调用viop_Q_BertResult()函数，得到bert测试各项结果的值
+                str_BER = QString(result);	               //得到bert测试下 ber的值 根据测试要求这个值小于10的负五次方的话为合格
+                double strBER=str_BER.toDouble();
 
-                  //写入excel
-             cellA1 = worksheet->querySubObject("Cells(int,int)",row-2,colum);
-             cellA1->dynamicCall("SetValue(const QVariant&)",QString::number(freDown));   //写入频率
-             cellA1->setProperty("HorizontalAlignment", -4108);           //居中
-             cellA1->setProperty("VerticalAlignment", -4108);             //居中
+                //写入excel
+                cellA1 = worksheet->querySubObject("Cells(int,int)",row-2,colum);
+                cellA1->dynamicCall("SetValue(const QVariant&)",QString::number(freDown));   //写入频率
+                cellA1->setProperty("HorizontalAlignment", -4108);           //居中
+                cellA1->setProperty("VerticalAlignment", -4108);             //居中
 
-             cellA1 = worksheet->querySubObject("Cells(int,int)",row-1,colum);
-             cellA1->dynamicCall("SetValue(const QVariant&)",str_BER);    //写入误码率
-             cellA1->setProperty("HorizontalAlignment", -4108);           //居中
-             cellA1->setProperty("VerticalAlignment", -4108);             //居中
+                cellA1 = worksheet->querySubObject("Cells(int,int)",row-1,colum);
+                cellA1->dynamicCall("SetValue(const QVariant&)",str_BER);    //写入误码率
+                cellA1->setProperty("HorizontalAlignment", -4108);           //居中
+                cellA1->setProperty("VerticalAlignment", -4108);             //居中
 
-             if(strBER<=BerStand)
-             {
-                     cellA1 = worksheet->querySubObject("Cells(int,int)",row,colum);
-                     cellA1->dynamicCall("SetValue(const QVariant&)","T");   //写入结果
-                     cellA1->setProperty("HorizontalAlignment", -4108);         //居中
-                     cellA1->setProperty("VerticalAlignment", -4108);           //居中
-              }
-             if(strBER>BerStand)
-             {
-              cellA1 = worksheet->querySubObject("Cells(int,int)",row,colum);
-              cellA1->dynamicCall("SetValue(const QVariant&)","F");    //写入结果
-              cellA1->setProperty("HorizontalAlignment", -4108);           //居中
-             cellA1->setProperty("VerticalAlignment", -4108);             //居中
-              }
-                  colum++;
+                if(strBER<=BerStand)
+                {
+                    cellA1 = worksheet->querySubObject("Cells(int,int)",row,colum);
+                    cellA1->dynamicCall("SetValue(const QVariant&)","T");   //写入结果
+                    cellA1->setProperty("HorizontalAlignment", -4108);         //居中
+                    cellA1->setProperty("VerticalAlignment", -4108);           //居中
+                }
+                if(strBER>BerStand)
+                {
+                    cellA1 = worksheet->querySubObject("Cells(int,int)",row,colum);
+                    cellA1->dynamicCall("SetValue(const QVariant&)","F");    //写入结果
+                    cellA1->setProperty("HorizontalAlignment", -4108);           //居中
+                    cellA1->setProperty("VerticalAlignment", -4108);             //居中
+                }
+                colum++;
             }
-          freDown=ui->RxRangeFreDown->text().toDouble();
-          colum=2;
-          row++;
-      }
+            freDown=ui->RxRangeFreDown->text().toDouble();
+            colum=2;
+            row++;
+        }
 
         ui->lineEdit_Row->setText(QString::number(row));
         //芯片号增加
@@ -1064,709 +1406,709 @@ MainWindow::MainWindow(QWidget *parent) :
         excel->dynamicCall("Quit()");                                   //关闭excel
         delete excel;
         excel=nullptr;
-       QMessageBox::information(this,"RX带宽测试","完成");
-     });
+        QMessageBox::information(this,"RX带宽测试","完成");
+    });
 
 
-      //Rx接收灵敏度默认选5.83GHz
-       ui->btnRx5830->setChecked(true);
-      //Rx灵敏度测试
-          connect(ui->btnRX,&QPushButton::clicked,[&]()
-          {
-               QString textLab;
-               ToalBits=ui->EditTolBits->text();
-               ptr_N5172B->VIOpSignalGenerator::viop_realtimeOn();                  //realtime
-               ptr_N5172B->VIOpSignalGenerator::viop_modulationType();              //设置ASK
-               ptr_N5172B->VIOpSignalGenerator::viop_alpha();                       //设置阿尔法为1
-               ptr_N5172B->VIOpSignalGenerator::viop_alphaDepth();                  //85%
-               ptr_N5172B->VIOpSignalGenerator::viop_symbolRate(512);               //symbol rate 默认单位Ksps
-               ptr_N5172B->VIOpSignalGenerator::viop_loadData();                    //load文件PN9-1FF-FM0
-               ptr_N5172B->VIOpSignalGenerator::viop_displayMode(SCIENTIFIC);       //科学计数法显示误码率
-               ptr_N5172B->VIOpSignalGenerator::viop_BERTtriggerSource(IMM);        //trigger-immediate
-               ptr_N5172B->VIOpSignalGenerator::viop_totalBit(ToalBits);            //设置totalBit为1千万
-               ptr_N5172B->VIOpSignalGenerator::viop_MODOn();
-               ptr_N5172B->VIOpSignalGenerator::viop_RFOn();                         //打开RF
-               ptr_N5172B->VIOpSignalGenerator::viop_bertOn();                       //打开
+    //Rx接收灵敏度默认选5.83GHz
+    ui->btnRx5830->setChecked(true);
+    //Rx灵敏度测试
+    connect(ui->btnRX,&QPushButton::clicked,[&]()
+    {
+        QString textLab;
+        ToalBits=ui->EditTolBits->text();
+        ptr_N5172B->VIOpSignalGenerator::viop_realtimeOn();                  //realtime
+        ptr_N5172B->VIOpSignalGenerator::viop_modulationType();              //设置ASK
+        ptr_N5172B->VIOpSignalGenerator::viop_alpha();                       //设置阿尔法为1
+        ptr_N5172B->VIOpSignalGenerator::viop_alphaDepth();                  //85%
+        ptr_N5172B->VIOpSignalGenerator::viop_symbolRate(512);               //symbol rate 默认单位Ksps
+        ptr_N5172B->VIOpSignalGenerator::viop_loadData();                    //load文件PN9-1FF-FM0
+        ptr_N5172B->VIOpSignalGenerator::viop_displayMode(SCIENTIFIC);       //科学计数法显示误码率
+        ptr_N5172B->VIOpSignalGenerator::viop_BERTtriggerSource(IMM);        //trigger-immediate
+        ptr_N5172B->VIOpSignalGenerator::viop_totalBit(ToalBits);            //设置totalBit为1千万
+        ptr_N5172B->VIOpSignalGenerator::viop_MODOn();
+        ptr_N5172B->VIOpSignalGenerator::viop_RFOn();                         //打开RF
+        ptr_N5172B->VIOpSignalGenerator::viop_bertOn();                       //打开
 
-               if(ui->btnRx5830->isChecked())
-               {
-                    ptr_N5172B->VIOpSignalGenerator::SetFre("5.83");
-                    textLab="号5.83GHz";
-               }
-               if(ui->btnRx5840->isChecked())
-               {
-                  ptr_N5172B->VIOpSignalGenerator::SetFre("5.84");
-                  textLab="号5.84GHz";
-               }
+        if(ui->btnRx5830->isChecked())
+        {
+            ptr_N5172B->VIOpSignalGenerator::SetFre("5.83");
+            textLab="号5.83GHz";
+        }
+        if(ui->btnRx5840->isChecked())
+        {
+            ptr_N5172B->VIOpSignalGenerator::SetFre("5.84");
+            textLab="号5.84GHz";
+        }
 
-               //  根据实际赋值
-               AmplUpper=ui->EditamplUP->text().toInt();                               //ampl上限
-               AmplLower=ui->EditamplLW->text().toInt();                               //ampl下限
-               AmplStep=ui->Editamplstep->text().toInt();                              //ampl步长
-               BerStand=ui->EditBer->text().toDouble();                                   //误码率
+        //  根据实际赋值
+        AmplUpper=ui->EditamplUP->text().toInt();                               //ampl上限
+        AmplLower=ui->EditamplLW->text().toInt();                               //ampl下限
+        AmplStep=ui->Editamplstep->text().toInt();                              //ampl步长
+        BerStand=ui->EditBer->text().toDouble();                                   //误码率
 
-               //检查输入情况
-               if(AmplUpper<AmplLower||FreUp<FreDown)
-                  {
-                    QMessageBox::information(this,"错误","数值输入错误");
-                      return;
-                  }
-               //选择文件
-               QString filepath;
-               filepath =QFileDialog::getOpenFileName(nullptr,("选择文件"),("C:/Users/ztp/Desktop"),("*.xls *.xlsx *.csv")); //获取保存路径
-               if(filepath.isEmpty())
-               {
-                   QMessageBox::critical(nullptr, "错误信息", "没有找到EXCEL");
-                       return;
-               }
+        //检查输入情况
+        if(AmplUpper<AmplLower||FreUp<FreDown)
+        {
+            QMessageBox::information(this,"错误","数值输入错误");
+            return;
+        }
+        //选择文件
+        QString filepath;
+        filepath =QFileDialog::getOpenFileName(nullptr,("选择文件"),("C:/Users/ztp/Desktop"),("*.xls *.xlsx *.csv")); //获取保存路径
+        if(filepath.isEmpty())
+        {
+            QMessageBox::critical(nullptr, "错误信息", "没有找到EXCEL");
+            return;
+        }
 
-               QAxObject *excel = new QAxObject();
-               excel->setControl("ket.Application");                                     //连接WPS
-               excel->dynamicCall("SetVisible(bool Visible)","false");                   //不显示窗体
-               excel->setProperty("DisplayAlerts", false);                               //不显示任何警告信息。如果为true那么在关闭是会出现类似“文件已修改，是否保存”的提示
-               QAxObject* workbooks = excel->querySubObject("WorkBooks");                //获取工作簿集合
-               workbooks->dynamicCall("Open(const QString&)",filepath);                  //打开打开已存在的工作簿
-               QAxObject *workbook = excel->querySubObject("ActiveWorkBook");            //获取当前工作簿
-               QAxObject *worksheets = workbook->querySubObject("WorkSheets");           //获取工作表集合
-               QAxObject *worksheet = worksheets->querySubObject("Item(int)",1);         //获取工作表集合的工作表1，即sheet1
-               QAxObject *cellA1;
+        QAxObject *excel = new QAxObject();
+        excel->setControl("ket.Application");                                     //连接WPS
+        excel->dynamicCall("SetVisible(bool Visible)","false");                   //不显示窗体
+        excel->setProperty("DisplayAlerts", false);                               //不显示任何警告信息。如果为true那么在关闭是会出现类似“文件已修改，是否保存”的提示
+        QAxObject* workbooks = excel->querySubObject("WorkBooks");                //获取工作簿集合
+        workbooks->dynamicCall("Open(const QString&)",filepath);                  //打开打开已存在的工作簿
+        QAxObject *workbook = excel->querySubObject("ActiveWorkBook");            //获取当前工作簿
+        QAxObject *worksheets = workbook->querySubObject("WorkSheets");           //获取工作表集合
+        QAxObject *worksheet = worksheets->querySubObject("Item(int)",1);         //获取工作表集合的工作表1，即sheet1
+        QAxObject *cellA1;
 
-               if(TestFirst)
-               {
-                    cellA1 = worksheet->querySubObject("Cells(int,int)",1,1);
-                    cellA1->dynamicCall("SetValue(const QVariant&)","Rx灵敏度测试");         //写入数据
-                    cellA1->setProperty("HorizontalAlignment", -4108);                     //居中
-                    cellA1->setProperty("VerticalAlignment", -4108);                       //居中
-                    TestFirst=false;
-               }
+        if(TestFirst)
+        {
+            cellA1 = worksheet->querySubObject("Cells(int,int)",1,1);
+            cellA1->dynamicCall("SetValue(const QVariant&)","Rx灵敏度测试");         //写入数据
+            cellA1->setProperty("HorizontalAlignment", -4108);                     //居中
+            cellA1->setProperty("VerticalAlignment", -4108);                       //居中
+            TestFirst=false;
+        }
 
-               textLab=ui->EditBoard->text()+ textLab;
-               cellA1= worksheet->querySubObject("Cells(int,int)",row++,1);
-               cellA1->dynamicCall("SetValue(const QVariant&)",textLab);                   //写入板号
-               cellA1->setProperty("HorizontalAlignment", -4108);                          //居中
-               cellA1->setProperty("VerticalAlignment", -4108);                            //居中
-               int colum=2;
+        textLab=ui->EditBoard->text()+ textLab;
+        cellA1= worksheet->querySubObject("Cells(int,int)",row++,1);
+        cellA1->dynamicCall("SetValue(const QVariant&)",textLab);                   //写入板号
+        cellA1->setProperty("HorizontalAlignment", -4108);                          //居中
+        cellA1->setProperty("VerticalAlignment", -4108);                            //居中
+        int colum=2;
 
-               // 第二行数据进行操作
-               cellA1 = worksheet->querySubObject("Cells(int,int)",row++,1);
-               cellA1->dynamicCall("SetValue(const QVariant&)","功率(dBm)");         //写入功率
-               cellA1->setProperty("HorizontalAlignment", -4108);                   //居中
-               cellA1->setProperty("VerticalAlignment", -4108);                     //居中
+        // 第二行数据进行操作
+        cellA1 = worksheet->querySubObject("Cells(int,int)",row++,1);
+        cellA1->dynamicCall("SetValue(const QVariant&)","功率(dBm)");         //写入功率
+        cellA1->setProperty("HorizontalAlignment", -4108);                   //居中
+        cellA1->setProperty("VerticalAlignment", -4108);                     //居中
 
-               cellA1 = worksheet->querySubObject("Cells(int,int)",row++,1);
-               cellA1->dynamicCall("SetValue(const QVariant&)","误码率");             //写入误码率
-               cellA1->setProperty("HorizontalAlignment", -4108);                    //居中
-               cellA1->setProperty("VerticalAlignment", -4108);                      //居中
-               cellA1 = worksheet->querySubObject("Cells(int,int)",row,1);
-               cellA1->dynamicCall("SetValue(const QVariant&)","结果");               //写入结果
-               cellA1->setProperty("HorizontalAlignment", -4108);                    //居中
-               cellA1->setProperty("VerticalAlignment", -4108);                      //居中
+        cellA1 = worksheet->querySubObject("Cells(int,int)",row++,1);
+        cellA1->dynamicCall("SetValue(const QVariant&)","误码率");             //写入误码率
+        cellA1->setProperty("HorizontalAlignment", -4108);                    //居中
+        cellA1->setProperty("VerticalAlignment", -4108);                      //居中
+        cellA1 = worksheet->querySubObject("Cells(int,int)",row,1);
+        cellA1->dynamicCall("SetValue(const QVariant&)","结果");               //写入结果
+        cellA1->setProperty("HorizontalAlignment", -4108);                    //居中
+        cellA1->setProperty("VerticalAlignment", -4108);                      //居中
 
-                   //功率循环
-                   for(;AmplUpper>=AmplLower;AmplUpper=AmplUpper-AmplStep)
-                    {
-                       QString TemAmplS=QString::number(AmplUpper);
-                       ptr_N5172B->VIOpSignalGenerator::SetAmpl(TemAmplS);                  //输入ampl
-                       Delay_MSec(100);
-                       ptr_N5172B->VIOpSignalGenerator::viop_bertOff();                         //关闭bert
-                       ptr_N5172B->VIOpSignalGenerator::viop_bertOn();                          //打开bert
-                       Delay_MSec(2000);                                                        //延时约4秒等待BER稳定
-                       //返回BERT结果
-                       result = ptr_N5172B ->viop_Q_BertResult1();                               //调用viop_Q_BertResult()函数，得到bert测试各项结果的值
-//                       p = strtok(result,d);
-//                       str_totalBits=QString(p);           //得到bert测试下 totalBits的值
-//                       p = strtok(nullptr, d);
-//                       str_errorBits = QString(p);        //得到bert测试下 errorBits
-//                       p = strtok(nullptr, d);
-                       str_BER = QString(result);	               //得到bert测试下 ber的值 根据测试要求这个值小于10的负五次方的话为合格
-                       double strBER=str_BER.toDouble();
+        //功率循环
+        for(;AmplUpper>=AmplLower;AmplUpper=AmplUpper-AmplStep)
+        {
+            QString TemAmplS=QString::number(AmplUpper);
+            ptr_N5172B->VIOpSignalGenerator::SetAmpl(TemAmplS);                  //输入ampl
+            Delay_MSec(100);
+            ptr_N5172B->VIOpSignalGenerator::viop_bertOff();                         //关闭bert
+            ptr_N5172B->VIOpSignalGenerator::viop_bertOn();                          //打开bert
+            Delay_MSec(2000);                                                        //延时约4秒等待BER稳定
+            //返回BERT结果
+            result = ptr_N5172B ->viop_Q_BertResult1();                               //调用viop_Q_BertResult()函数，得到bert测试各项结果的值
+            //                       p = strtok(result,d);
+            //                       str_totalBits=QString(p);           //得到bert测试下 totalBits的值
+            //                       p = strtok(nullptr, d);
+            //                       str_errorBits = QString(p);        //得到bert测试下 errorBits
+            //                       p = strtok(nullptr, d);
+            str_BER = QString(result);	               //得到bert测试下 ber的值 根据测试要求这个值小于10的负五次方的话为合格
+            double strBER=str_BER.toDouble();
 
-                       //写入excel
-                       cellA1 = worksheet->querySubObject("Cells(int,int)",row-2,colum);
-                       cellA1->dynamicCall("SetValue(const QVariant&)",TemAmplS);   //写入功率
-                       cellA1->setProperty("HorizontalAlignment", -4108);           //居中
-                       cellA1->setProperty("VerticalAlignment", -4108);             //居中
+            //写入excel
+            cellA1 = worksheet->querySubObject("Cells(int,int)",row-2,colum);
+            cellA1->dynamicCall("SetValue(const QVariant&)",TemAmplS);   //写入功率
+            cellA1->setProperty("HorizontalAlignment", -4108);           //居中
+            cellA1->setProperty("VerticalAlignment", -4108);             //居中
 
-                       cellA1 = worksheet->querySubObject("Cells(int,int)",row-1,colum);
-                       cellA1->dynamicCall("SetValue(const QVariant&)",str_BER);    //写入误码率
-                       cellA1->setProperty("HorizontalAlignment", -4108);           //居中
-                       cellA1->setProperty("VerticalAlignment", -4108);             //居中
+            cellA1 = worksheet->querySubObject("Cells(int,int)",row-1,colum);
+            cellA1->dynamicCall("SetValue(const QVariant&)",str_BER);    //写入误码率
+            cellA1->setProperty("HorizontalAlignment", -4108);           //居中
+            cellA1->setProperty("VerticalAlignment", -4108);             //居中
 
-                       if(strBER<=BerStand)
-                       {
-                          cellA1 = worksheet->querySubObject("Cells(int,int)",row,colum);
-                          cellA1->dynamicCall("SetValue(const QVariant&)","T");   //写入结果
-                          cellA1->setProperty("HorizontalAlignment", -4108);         //居中
-                          cellA1->setProperty("VerticalAlignment", -4108);           //居中
-                       }
-                       if(strBER>BerStand)
-                       {
-                          cellA1 = worksheet->querySubObject("Cells(int,int)",row,colum);
-                          cellA1->dynamicCall("SetValue(const QVariant&)","F");    //写入结果
-//                          QAxObject *font = cellA1->querySubObject("Font");            //获取单元格字体
-//                          font->setProperty("Bold", "true");                        //设置单元格字体颜色（红色）
-//                          font->setProperty("Color", QColor(255, 0, 0));               //设置单元格字体颜色（红色）
-                          cellA1->setProperty("HorizontalAlignment", -4108);           //居中
-                          cellA1->setProperty("VerticalAlignment", -4108);             //居中
-                       }
-                       colum++;
-                   }
-               colum=2;
-               row++;
-               ui->lineEdit_Row->setText(QString::number(row));
-               //芯片号增加
-               chipNum=ui->EditBoard->text().toInt();
-               chipNum++;
-               ui->EditBoard->setText(QString::number(chipNum));//显示下一个芯片号
-               free(result);
-               //关闭文件
-               workbook->dynamicCall("SaveAs(const QString&)",QDir::toNativeSeparators(filepath));
-               workbook->dynamicCall("Close()");                               //关闭工作簿
-               excel->dynamicCall("Quit()");                                   //关闭excel
-               delete excel;
-               excel=nullptr;
-              QMessageBox::information(this,"RX接收灵敏度测试","完成");
-           });
-
-
-          //重置N5172B
-          connect(ui->btnRxRest,&QPushButton::clicked,[&](){
-               ptr_N5172B->viop_RST();
-               QMessageBox::information(this,"提示","仪器已经初始化");
-               return;
-          });
-
-          //配置N5172B为Rx测试状态
-          connect(ui->btnRxSet,&QPushButton::clicked,[&](){
-              ToalBits=ui->EditTolBits->text();
-              ptr_N5172B->VIOpSignalGenerator::viop_realtimeOn();                  //realtime
-              ptr_N5172B->VIOpSignalGenerator::viop_modulationType();              //设置ASK
-              ptr_N5172B->VIOpSignalGenerator::viop_alpha();                       //设置阿尔法为1
-              ptr_N5172B->VIOpSignalGenerator::viop_alphaDepth();                  //85%
-              ptr_N5172B->VIOpSignalGenerator::viop_symbolRate(512);               //symbol rate 默认单位Ksps
-              ptr_N5172B->VIOpSignalGenerator::viop_loadData();                    //load文件PN9-1FF-FM0
-              ptr_N5172B->VIOpSignalGenerator::viop_displayMode(SCIENTIFIC);       //科学计数法显示误码率
-              ptr_N5172B->VIOpSignalGenerator::viop_BERTtriggerSource(IMM);        //trigger-immediate
-              ptr_N5172B->VIOpSignalGenerator::viop_totalBit(ToalBits);            //设置totalBit为1千万
-              ptr_N5172B->VIOpSignalGenerator::SetAmpl("-30");                 //设置ampl-30
-              ptr_N5172B->VIOpSignalGenerator::viop_MODOn();
-              ptr_N5172B->VIOpSignalGenerator::viop_RFOn();                         //打开RF
-              ptr_N5172B->VIOpSignalGenerator::viop_bertOn();                       //打开
-              QMessageBox::information(this,"提示","仪器已经配置");
-          });
-
-          connect(ui->btnRxLineRow,&QPushButton::clicked,[&](){
-
-              if(ui->lineEdit_Row->text().isEmpty())
-              {
-                   QMessageBox::information(this,"警告","请输入合法数值");
-                   return;
-              }
-              else
-              {
-                   row=ui->lineEdit_Row->text().toInt();
-                   QMessageBox::information(this,"提示","excel行数已设置");
-              }
-
-          });
-
-        //Wu测试中更改Excel行数
-        connect(ui->WuexcelRow,&QPushButton::clicked,[&]()
-          {
-           if(ui->WulineRow->text().isEmpty()||ui->WulineRow->text().toInt()==0)
+            if(strBER<=BerStand)
             {
-               QMessageBox::information(this,"警告","请输入合法数值:1-999999");
-               return;
+                cellA1 = worksheet->querySubObject("Cells(int,int)",row,colum);
+                cellA1->dynamicCall("SetValue(const QVariant&)","T");   //写入结果
+                cellA1->setProperty("HorizontalAlignment", -4108);         //居中
+                cellA1->setProperty("VerticalAlignment", -4108);           //居中
             }
-           else
-           {
-             row=ui->WulineRow->text().toInt();
-             QMessageBox::information(this,"提示","excel行数已设置");
-          }
-          });
-
-          //Rx多频点测量
-          connect(ui->btnMulRx,&QPushButton::clicked,[&]()
-          {
-              //检查
-              if(ui->tblWidget->item(0,0)->text().isEmpty())
-              {
-                  QMessageBox::information(this,"提示","请输入测试频点");
-                  return;
-              }
-
-              AmplUpper=ui->EditamplUP->text().toInt();                               //ampl上限
-              AmplLower=ui->EditamplLW->text().toInt();                               //ampl下限
-              if(AmplUpper<AmplLower)
-               {
-                   QMessageBox::information(this,"错误","功率下限不能超过功率上限");
-                     return;
-               }
-
-              //读取测试频点
-              int columnCount=ui->tblWidget->columnCount();                       //表格列数
-               QStringList frepotss;
-              for(int i=0;i<columnCount;i++)
-              {
-                  if(ui->tblWidget->item(0,i)!=nullptr)
-                  {
-                      if(!(ui->tblWidget->item(0,i)->text().isEmpty()))
-                      {
-                           frepotss.append(ui->tblWidget->item(0,i)->text());
-                      }
-                  }
-                  else
-                  {
-                      continue;
-                  }
-              }
-               ToalBits=ui->EditTolBits->text();
-               ptr_N5172B->VIOpSignalGenerator::viop_realtimeOn();                  //realtime
-               ptr_N5172B->VIOpSignalGenerator::viop_modulationType();              //设置ASK
-               ptr_N5172B->VIOpSignalGenerator::viop_alpha();                       //设置阿尔法为1
-               ptr_N5172B->VIOpSignalGenerator::viop_alphaDepth();                  //85%
-               ptr_N5172B->VIOpSignalGenerator::viop_symbolRate(512);               //symbol rate 默认单位Ksps
-               ptr_N5172B->VIOpSignalGenerator::viop_loadData();                    //load文件PN9-1FF-FM0
-               ptr_N5172B->VIOpSignalGenerator::viop_displayMode(SCIENTIFIC);       //科学计数法显示误码率
-               ptr_N5172B->VIOpSignalGenerator::viop_BERTtriggerSource(IMM);        //trigger-immediate
-               ptr_N5172B->VIOpSignalGenerator::viop_totalBit(ToalBits);            //设置totalBit为1千万
-               ptr_N5172B->VIOpSignalGenerator::SetAmpl("-30");                 //设置ampl-30
-               ptr_N5172B->VIOpSignalGenerator::viop_MODOn();
-               ptr_N5172B->VIOpSignalGenerator::viop_RFOn();                         //打开RF
-               ptr_N5172B->VIOpSignalGenerator::viop_bertOn();                       //打开
-               AmplStep=ui->Editamplstep->text().toInt();                              //ampl步长
-               BerStand=ui->EditBer->text().toInt();                                   //误码率
-               int p583=0,p584=0;
-//               bool TestFlag=false;
-               for(int i=0;i<2;i++)
-               {
-                   //设置频率
-                   if(i==0)
-                   {
-                     ptr_N5172B->VIOpSignalGenerator::SetFre("5.83");
-                   }
-                   else
-                   {
-                     ptr_N5172B->VIOpSignalGenerator::SetFre("5.84");
-                   }
-                   AmplUpper=ui->EditamplUP->text().toInt();                               //ampl上限
-                   AmplLower=ui->EditamplLW->text().toInt();                               //ampl下限
-                   AmplStep=ui->Editamplstep->text().toInt();                              //ampl步长
-                   //5.83频点处的灵敏度为0，则程序中断
-                   if(i==1&&p583==0)
-                   {
-                       QMessageBox::information(this,"提示","5.83GHz灵敏度为0，程序结束");
-                       return;
-                   }
-                  //设置功率
-                   for(;AmplUpper>=AmplLower;AmplUpper=AmplUpper-AmplStep)
-                    {
-                       QString TemAmplS=QString::number(AmplUpper);
-                       ptr_N5172B->VIOpSignalGenerator::SetAmpl(TemAmplS);                  //输入ampl
-                       //QMessageBox::information(this,"此时功率","此时功率"+TemAmplS);            //可以显示此时功率
-                       Delay_MSec(200);
-                       ptr_N5172B->VIOpSignalGenerator::viop_bertOff();                         //关闭bert
-                       ptr_N5172B->VIOpSignalGenerator::viop_bertOn();                          //打开bert
-                       Delay_MSec(2000);                                                        //延时约3秒等待BER稳定
-                      //返回BERT结果
-                       result = ptr_N5172B ->viop_Q_BertResult1();                                //调用viop_Q_BertResult()函数，得到bert测试各项结果的值
-                       str_BER = QString(result);	                                                 //得到bert测试下 ber的值 根据测试要求这个值小于10的负五次方的话为合格
-                       double strBER=str_BER.toDouble();
-                       //写入excel
-                       if(strBER>BerStand)
-                       {
-                           p583=AmplUpper+1;
-                           AmplLower=AmplUpper+1;
-//                           TestFlag=true;
-                       }
-                       if(strBER>BerStand&&(i!=0))
-                       {
-                           p584=AmplUpper+1;
-                           AmplLower=AmplUpper+1;
-                       }
-                   }
-               }
-
-               QMessageBox::information(this,"此时功率","5.83GHz接收灵敏度"+QString::number(p583,10)+" 5.84GHz接收灵敏度"+QString::number(p584,10));   //可以显示此时功率
-
-               //5.83和5.84两个频点灵敏度差值过大
-               if(qAbs(p583-p584)>=3)
-               {
-                   QMessageBox::information(this,"提示","灵敏度相差过大，程序结束");
-                   return;
-               }
-
-               if(!(ui->lineEditMeansRx->text().isEmpty()))
-               {
-                    int MeansAmpl=ui->lineEditMeansRx->text().toInt();
-                    //当灵敏度大过平均灵敏度4个点
-                    if(qAbs(p583-MeansAmpl)==4)
-                    {
-                        QMessageBox::information(this,"提示","5.83GHz的功率为"+QString::number(p583,10));
-                        return;
-                    }
-                    //当灵敏度大过平均灵敏度5个点
-                    if(qAbs(p583-MeansAmpl)==5)
-                    {
-                         QMessageBox::information(this,"提示","5.83GHz的功率为"+QString::number(p583,10));
-                         return;
-                    }
-               }
-
-               //选择文件
-               QString filepath;
-               filepath =QFileDialog::getOpenFileName(nullptr,("选择文件"),("C:/Users/ztp/Desktop"),("*.xls *.xlsx *.csv")); //获取保存路径
-               if(filepath.isEmpty())
-               {
-                   QMessageBox::critical(nullptr, "错误信息", "没有找到EXCEL");
-                       return;
-               }
-
-               QAxObject *excel = new QAxObject();
-               excel->setControl("ket.Application");                                     //连接WPS
-               excel->dynamicCall("SetVisible(bool Visible)","false");                   //不显示窗体
-               excel->setProperty("DisplayAlerts", false);                               //不显示任何警告信息。如果为true那么在关闭是会出现类似“文件已修改，是否保存”的提示
-               QAxObject* workbooks = excel->querySubObject("WorkBooks");                //获取工作簿集合
-               workbooks->dynamicCall("Open(const QString&)",filepath);                  //打开打开已存在的工作簿
-               QAxObject *workbook = excel->querySubObject("ActiveWorkBook");            //获取当前工作簿
-               QAxObject *worksheets = workbook->querySubObject("WorkSheets");           //获取工作表集合
-               QAxObject *worksheet = worksheets->querySubObject("Item(int)",1);         //获取工作表集合的工作表1，即sheet1
-               QAxObject *cellA;
-
-               if(RxMultTextFirst)
-               {
-                    cellA= worksheet->querySubObject("Cells(int,int)",1,1);
-                    cellA->dynamicCall("SetValue(const QVariant&)","No.");           //写入数据
-                    cellA->setProperty("HorizontalAlignment", -4108);                     //居中
-                    cellA->setProperty("VerticalAlignment", -4108);                       //居中
-                    cellA = worksheet->querySubObject("Cells(int,int)",1,2);
-                    cellA->dynamicCall("SetValue(const QVariant&)","5.83");         //写入数据
-                    cellA->setProperty("HorizontalAlignment", -4108);                     //居中
-                    cellA->setProperty("VerticalAlignment", -4108);                       //居中]
-                    cellA = worksheet->querySubObject("Cells(int,int)",1,3);
-                    cellA->dynamicCall("SetValue(const QVariant&)","5.84");         //写入数据
-                    cellA->setProperty("HorizontalAlignment", -4108);                     //居中
-                    cellA->setProperty("VerticalAlignment", -4108);                       //居中
-                    for(int i=0;i<frepotss.length();i++)
-                    {
-                        cellA= worksheet->querySubObject("Cells(int,int)",1,4+i);
-                        cellA->dynamicCall("SetValue(const QVariant&)",frepotss[i]);         //写入数据
-                        cellA->setProperty("HorizontalAlignment", -4108);                     //居中
-                        cellA->setProperty("VerticalAlignment", -4108);                       //居中
-                    }
-                    RxMultTextFirst=false;
-               }
-
-               cellA = worksheet->querySubObject("Cells(int,int)",row,1);
-               cellA->dynamicCall("SetValue(const QVariant&)",ui->EditBoard->text());                //
-               cellA->setProperty("HorizontalAlignment", -4108);
-               cellA->setProperty("VerticalAlignment", -4108);
-
-               cellA = worksheet->querySubObject("Cells(int,int)",row,2);
-               cellA->dynamicCall("SetValue(const QVariant&)",p583);                                 //
-               cellA->setProperty("HorizontalAlignment", -4108);
-               cellA->setProperty("VerticalAlignment", -4108);
-
-               cellA = worksheet->querySubObject("Cells(int,int)",row,3);
-               cellA->dynamicCall("SetValue(const QVariant&)",p584);                                       //
-               cellA->setProperty("HorizontalAlignment", -4108);
-               cellA->setProperty("VerticalAlignment", -4108);
-
-             //判断5.83  频率点
-              //功率确定
-              AmplUpper=p583+6;
-              ptr_N5172B->VIOpSignalGenerator::SetAmpl(QString::number(AmplUpper));                  //输入ampl
-              for(int i=0;i<5;i++)
-              {
-                    ptr_N5172B->VIOpSignalGenerator::SetFre(frepotss[i]);
-                    ptr_N5172B->VIOpSignalGenerator::SetAmpl(QString::number(AmplUpper));                  //输入ampl
-                    Delay_MSec(200);
-                    ptr_N5172B->VIOpSignalGenerator::viop_bertOff();                         //关闭bert
-                    ptr_N5172B->VIOpSignalGenerator::viop_bertOn();                          //打开bert
-                    Delay_MSec(2000);                                                        //延时约3秒等待BER稳定
-                   //返回BERT结果
-                    result = ptr_N5172B ->viop_Q_BertResult1();                                //调用viop_Q_BertResult()函数，得到bert测试各项结果的值
-                    str_BER = QString(result);	                                                 //得到bert测试下 ber的值 根据测试要求这个值小于10的负五次方的话为合格
-                    double strBER=str_BER.toDouble();
-                    if(strBER<=BerStand)                   //判断数据
-                    {
-                        QAxObject *cellA0 = worksheet->querySubObject("Cells(int,int)",row,4+i);
-                        cellA0->dynamicCall("SetValue(const QVariant&)","T");
-                        cellA0->setProperty("HorizontalAlignment", -4108);                          //居中
-                        cellA0->setProperty("VerticalAlignment", -4108);                            //居中
-                    }
-                    else
-                    {
-                        QAxObject *cellA0 = worksheet->querySubObject("Cells(int,int)",row,4+i);
-                        cellA0->dynamicCall("SetValue(const QVariant&)","F");                   //写入板号
-                        QAxObject *font = cellA0->querySubObject("Font");            //获取单元格字体
-                        font->setProperty("Color", QColor(255, 0, 0));               //设置单元格字体颜色（红色）
-                        font->setProperty("Bold", true);
-                        cellA0->setProperty("HorizontalAlignment", -4108);                          //居中
-                        cellA0->setProperty("VerticalAlignment", -4108);                            //居中
-                    }
-              }
-              //判断5.84  频率点
-              //功率确定
-              AmplUpper=p584+6;
-              for(int i=5;i<(frepotss.length());i++)
-              {
-                    ptr_N5172B->VIOpSignalGenerator::SetFre(frepotss[i]);
-                    ptr_N5172B->VIOpSignalGenerator::SetAmpl(QString::number(AmplUpper));                  //输入ampl
-                    Delay_MSec(200);
-                    ptr_N5172B->VIOpSignalGenerator::viop_bertOff();                         //关闭bert
-                    ptr_N5172B->VIOpSignalGenerator::viop_bertOn();                          //打开bert
-                    Delay_MSec(2000);                                                        //延时约3秒等待BER稳定
-                   //返回BERT结果
-                    result = ptr_N5172B ->viop_Q_BertResult();                                //调用viop_Q_BertResult()函数，得到bert测试各项结果的值
-                    str_BER = QString(result);	                                                 //得到bert测试下 ber的值 根据测试要求这个值小于10的负五次方的话为合格
-                    double strBER=str_BER.toDouble();
-                    if(strBER<=BerStand)                   //判断数据
-                    {
-                        cellA= worksheet->querySubObject("Cells(int,int)",row,4+i);
-                        cellA->dynamicCall("SetValue(const QVariant&)","T");
-                        cellA->setProperty("HorizontalAlignment", -4108);                          //居中
-                        cellA->setProperty("VerticalAlignment", -4108);                            //居中
-                    }
-                    else
-                    {
-                        cellA = worksheet->querySubObject("Cells(int,int)",row,4+i);
-                        cellA->dynamicCall("SetValue(const QVariant&)","F");
-                        QAxObject *font = cellA->querySubObject("Font");            //获取单元格字体
-                        font->setProperty("Color", QColor(255, 0, 0));               //设置单元格字体颜色（红色）
-                        font->setProperty("Bold", true);                             //设置单元格字体加粗
-                        cellA->setProperty("HorizontalAlignment", -4108);                          //居中
-                        cellA->setProperty("VerticalAlignment", -4108);                            //居中
-                    }
-              }
-               //excel行数增加
-               row++;    //全局变量，行数加一
-               ui->lineEdit_Row->setText(QString::number(row));
-
-               //芯片号增加
-               int chiNumMulRx;
-               chiNumMulRx=ui->EditBoard->text().toInt();                               //记录芯片号
-               chiNumMulRx++;
-               ui->EditBoard->setText(QString::number(chiNumMulRx));//显示下一个芯片号
-               frepotss.clear();
-               free(result);
-//               delete [] frepotss;
-               //关闭文件
-               workbook->dynamicCall("SaveAs(const QString&)",QDir::toNativeSeparators(filepath));
-               workbook->dynamicCall("Close()");                              //关闭工作簿
-               excel->dynamicCall("Quit()");                                  //关闭excel
-               delete excel;
-               excel=nullptr;
-               QMessageBox::information(this,"RX接收灵敏度测试","完成");
-           });
-
-          //Rx最大功率测量
-      connect(ui->btnRxMax,&QPushButton::clicked,[&]()
-     {
-          QString textLab;
-          ToalBits=ui->EditTolBits->text();
-          ptr_N5172B->VIOpSignalGenerator::viop_realtimeOn();                  //realtime
-          ptr_N5172B->VIOpSignalGenerator::viop_modulationType();              //设置ASK
-          ptr_N5172B->VIOpSignalGenerator::viop_alpha();                       //设置阿尔法为1
-          ptr_N5172B->VIOpSignalGenerator::viop_alphaDepth();                  //85%
-          ptr_N5172B->VIOpSignalGenerator::viop_symbolRate(512);               //symbol rate 默认单位Ksps
-          ptr_N5172B->VIOpSignalGenerator::viop_loadData();                    //load文件PN9-1FF-FM0
-          ptr_N5172B->VIOpSignalGenerator::viop_displayMode(SCIENTIFIC);       //科学计数法显示误码率
-          ptr_N5172B->VIOpSignalGenerator::viop_BERTtriggerSource(IMM);        //trigger-immediate
-          ptr_N5172B->VIOpSignalGenerator::viop_totalBit(ToalBits);            //设置totalBit为1千万
-          ptr_N5172B->VIOpSignalGenerator::viop_MODOn();
-          ptr_N5172B->VIOpSignalGenerator::viop_RFOn();                         //打开RF
-          ptr_N5172B->VIOpSignalGenerator::viop_bertOn();                       //打开
-
-         ptr_N5172B->VIOpSignalGenerator::SetFre(ui->RxMaxFre->text());                       //设置频率
-         textLab=ui->EditBoard->text()+"号 "+ui->RxMaxFre->text();
+            if(strBER>BerStand)
+            {
+                cellA1 = worksheet->querySubObject("Cells(int,int)",row,colum);
+                cellA1->dynamicCall("SetValue(const QVariant&)","F");    //写入结果
+                //                          QAxObject *font = cellA1->querySubObject("Font");            //获取单元格字体
+                //                          font->setProperty("Bold", "true");                        //设置单元格字体颜色（红色）
+                //                          font->setProperty("Color", QColor(255, 0, 0));               //设置单元格字体颜色（红色）
+                cellA1->setProperty("HorizontalAlignment", -4108);           //居中
+                cellA1->setProperty("VerticalAlignment", -4108);             //居中
+            }
+            colum++;
+        }
+        colum=2;
+        row++;
+        ui->lineEdit_Row->setText(QString::number(row));
+        //芯片号增加
+        chipNum=ui->EditBoard->text().toInt();
+        chipNum++;
+        ui->EditBoard->setText(QString::number(chipNum));//显示下一个芯片号
+        free(result);
+        //关闭文件
+        workbook->dynamicCall("SaveAs(const QString&)",QDir::toNativeSeparators(filepath));
+        workbook->dynamicCall("Close()");                               //关闭工作簿
+        excel->dynamicCall("Quit()");                                   //关闭excel
+        delete excel;
+        excel=nullptr;
+        QMessageBox::information(this,"RX接收灵敏度测试","完成");
+    });
 
 
-          //  根据实际赋值
-          AmplUpper=ui->RxMaxRan->text().toInt();                               //ampl上限
-          AmplLower=ui->RxMaxPoint->text().toInt()+6;                           //ampl下限
-          AmplStep=ui->RxMaxStep->text().toInt();                            //ampl步长
+    //重置N5172B
+    connect(ui->btnRxRest,&QPushButton::clicked,[&](){
+        ptr_N5172B->viop_RST();
+        QMessageBox::information(this,"提示","仪器已经初始化");
+        return;
+    });
 
-          BerStand=ui->EditBer->text().toDouble();                            //误码率
+    //配置N5172B为Rx测试状态
+    connect(ui->btnRxSet,&QPushButton::clicked,[&](){
+        ToalBits=ui->EditTolBits->text();
+        ptr_N5172B->VIOpSignalGenerator::viop_realtimeOn();                  //realtime
+        ptr_N5172B->VIOpSignalGenerator::viop_modulationType();              //设置ASK
+        ptr_N5172B->VIOpSignalGenerator::viop_alpha();                       //设置阿尔法为1
+        ptr_N5172B->VIOpSignalGenerator::viop_alphaDepth();                  //85%
+        ptr_N5172B->VIOpSignalGenerator::viop_symbolRate(512);               //symbol rate 默认单位Ksps
+        ptr_N5172B->VIOpSignalGenerator::viop_loadData();                    //load文件PN9-1FF-FM0
+        ptr_N5172B->VIOpSignalGenerator::viop_displayMode(SCIENTIFIC);       //科学计数法显示误码率
+        ptr_N5172B->VIOpSignalGenerator::viop_BERTtriggerSource(IMM);        //trigger-immediate
+        ptr_N5172B->VIOpSignalGenerator::viop_totalBit(ToalBits);            //设置totalBit为1千万
+        ptr_N5172B->VIOpSignalGenerator::SetAmpl("-30");                 //设置ampl-30
+        ptr_N5172B->VIOpSignalGenerator::viop_MODOn();
+        ptr_N5172B->VIOpSignalGenerator::viop_RFOn();                         //打开RF
+        ptr_N5172B->VIOpSignalGenerator::viop_bertOn();                       //打开
+        QMessageBox::information(this,"提示","仪器已经配置");
+    });
 
-          //检查输入情况
-          if(AmplUpper<AmplLower)
-             {
-               QMessageBox::information(this,"错误","数值输入错误");
-                 return;
-             }
-          //选择文件
-          QString filepath;
-          filepath =QFileDialog::getOpenFileName(nullptr,("选择文件"),("C:/Users/ztp/Desktop"),("*.xls *.xlsx *.csv")); //获取保存路径
-          if(filepath.isEmpty())
-          {
-              QMessageBox::critical(nullptr, "错误信息", "没有找到EXCEL");
-                  return;
-          }
-          QAxObject *excel = new QAxObject();
-          excel->setControl("ket.Application");                                     //连接WPS
-          excel->dynamicCall("SetVisible(bool Visible)","false");                   //不显示窗体
-          excel->setProperty("DisplayAlerts", false);                               //不显示任何警告信息。如果为true那么在关闭是会出现类似“文件已修改，是否保存”的提示
-          QAxObject* workbooks = excel->querySubObject("WorkBooks");                //获取工作簿集合
-          workbooks->dynamicCall("Open(const QString&)",filepath);                  //打开打开已存在的工作簿
-          QAxObject *workbook = excel->querySubObject("ActiveWorkBook");            //获取当前工作簿
-          QAxObject *worksheets = workbook->querySubObject("WorkSheets");           //获取工作表集合
-          QAxObject *worksheet = worksheets->querySubObject("Item(int)",1);         //获取工作表集合的工作表1，即sheet1
-          QAxObject *cellA1;
+    connect(ui->btnRxLineRow,&QPushButton::clicked,[&](){
 
-          if(RxMaxFirst)
-          {
-               cellA1 = worksheet->querySubObject("Cells(int,int)",1,1);
-               cellA1->dynamicCall("SetValue(const QVariant&)","Rx最大功率测试");         //写入数据
-               cellA1->setProperty("HorizontalAlignment", -4108);                     //居中
-               cellA1->setProperty("VerticalAlignment", -4108);                       //居中
-               RxMaxFirst=false;
-          }
+        if(ui->lineEdit_Row->text().isEmpty())
+        {
+            QMessageBox::information(this,"警告","请输入合法数值");
+            return;
+        }
+        else
+        {
+            row=ui->lineEdit_Row->text().toInt();
+            QMessageBox::information(this,"提示","excel行数已设置");
+        }
 
-          textLab=ui->EditBoard->text()+ textLab;
-          cellA1= worksheet->querySubObject("Cells(int,int)",row++,1);
-          cellA1->dynamicCall("SetValue(const QVariant&)",textLab);                   //写入板号
-          cellA1->setProperty("HorizontalAlignment", -4108);                          //居中
-          cellA1->setProperty("VerticalAlignment", -4108);                            //居中
-          int colum=2;
+    });
 
-          // 第二行数据进行操作
-          cellA1 = worksheet->querySubObject("Cells(int,int)",row++,1);
-          cellA1->dynamicCall("SetValue(const QVariant&)","功率(dBm)");         //写入功率
-          cellA1->setProperty("HorizontalAlignment", -4108);                   //居中
-          cellA1->setProperty("VerticalAlignment", -4108);                     //居中
+    //Wu测试中更改Excel行数
+    connect(ui->WuexcelRow,&QPushButton::clicked,[&]()
+    {
+        if(ui->WulineRow->text().isEmpty()||ui->WulineRow->text().toInt()==0)
+        {
+            QMessageBox::information(this,"警告","请输入合法数值:1-999999");
+            return;
+        }
+        else
+        {
+            row=ui->WulineRow->text().toInt();
+            QMessageBox::information(this,"提示","excel行数已设置");
+        }
+    });
 
-          cellA1 = worksheet->querySubObject("Cells(int,int)",row++,1);
-          cellA1->dynamicCall("SetValue(const QVariant&)","误码率");             //写入误码率
-          cellA1->setProperty("HorizontalAlignment", -4108);                    //居中
-          cellA1->setProperty("VerticalAlignment", -4108);                      //居中
-          cellA1 = worksheet->querySubObject("Cells(int,int)",row,1);
-          cellA1->dynamicCall("SetValue(const QVariant&)","结果");               //写入结果
-          cellA1->setProperty("HorizontalAlignment", -4108);                    //居中
-          cellA1->setProperty("VerticalAlignment", -4108);                      //居中
+    //Rx多频点测量
+    connect(ui->btnMulRx,&QPushButton::clicked,[&]()
+    {
+        //检查
+        if(ui->tblWidget->item(0,0)->text().isEmpty())
+        {
+            QMessageBox::information(this,"提示","请输入测试频点");
+            return;
+        }
 
-              //功率循环
-              for(;AmplLower<AmplUpper;AmplLower=AmplLower+AmplStep)
-               {
-                  QString TemAmplS=QString::number(AmplLower);
-                  ptr_N5172B->VIOpSignalGenerator::SetAmpl(TemAmplS);                  //输入ampl
-                  Delay_MSec(100);
-                  ptr_N5172B->VIOpSignalGenerator::viop_bertOff();                         //关闭bert
-                  ptr_N5172B->VIOpSignalGenerator::viop_bertOn();                          //打开bert
-                  Delay_MSec(2000);                                                        //延时约4秒等待BER稳定
-                  //返回BERT结果
-                  result = ptr_N5172B ->viop_Q_BertResult1();                               //调用viop_Q_BertResult()函数，得到bert测试各项结果的值
-//                       p = strtok(result,d);
-//                       str_totalBits=QString(p);           //得到bert测试下 totalBits的值
-//                       p = strtok(nullptr, d);
-//                       str_errorBits = QString(p);        //得到bert测试下 errorBits
-//                       p = strtok(nullptr, d);
-                  str_BER = QString(result);	               //得到bert测试下 ber的值 根据测试要求这个值小于10的负五次方的话为合格
-                  double strBER=str_BER.toDouble();
+        AmplUpper=ui->EditamplUP->text().toInt();                               //ampl上限
+        AmplLower=ui->EditamplLW->text().toInt();                               //ampl下限
+        if(AmplUpper<AmplLower)
+        {
+            QMessageBox::information(this,"错误","功率下限不能超过功率上限");
+            return;
+        }
 
-                  //写入excel
-                  cellA1 = worksheet->querySubObject("Cells(int,int)",row-2,colum);
-                  cellA1->dynamicCall("SetValue(const QVariant&)",TemAmplS);   //写入功率
-                  cellA1->setProperty("HorizontalAlignment", -4108);           //居中
-                  cellA1->setProperty("VerticalAlignment", -4108);             //居中
+        //读取测试频点
+        int columnCount=ui->tblWidget->columnCount();                       //表格列数
+        QStringList frepotss;
+        for(int i=0;i<columnCount;i++)
+        {
+            if(ui->tblWidget->item(0,i)!=nullptr)
+            {
+                if(!(ui->tblWidget->item(0,i)->text().isEmpty()))
+                {
+                    frepotss.append(ui->tblWidget->item(0,i)->text());
+                }
+            }
+            else
+            {
+                continue;
+            }
+        }
+        ToalBits=ui->EditTolBits->text();
+        ptr_N5172B->VIOpSignalGenerator::viop_realtimeOn();                  //realtime
+        ptr_N5172B->VIOpSignalGenerator::viop_modulationType();              //设置ASK
+        ptr_N5172B->VIOpSignalGenerator::viop_alpha();                       //设置阿尔法为1
+        ptr_N5172B->VIOpSignalGenerator::viop_alphaDepth();                  //85%
+        ptr_N5172B->VIOpSignalGenerator::viop_symbolRate(512);               //symbol rate 默认单位Ksps
+        ptr_N5172B->VIOpSignalGenerator::viop_loadData();                    //load文件PN9-1FF-FM0
+        ptr_N5172B->VIOpSignalGenerator::viop_displayMode(SCIENTIFIC);       //科学计数法显示误码率
+        ptr_N5172B->VIOpSignalGenerator::viop_BERTtriggerSource(IMM);        //trigger-immediate
+        ptr_N5172B->VIOpSignalGenerator::viop_totalBit(ToalBits);            //设置totalBit为1千万
+        ptr_N5172B->VIOpSignalGenerator::SetAmpl("-30");                 //设置ampl-30
+        ptr_N5172B->VIOpSignalGenerator::viop_MODOn();
+        ptr_N5172B->VIOpSignalGenerator::viop_RFOn();                         //打开RF
+        ptr_N5172B->VIOpSignalGenerator::viop_bertOn();                       //打开
+        AmplStep=ui->Editamplstep->text().toInt();                              //ampl步长
+        BerStand=ui->EditBer->text().toInt();                                   //误码率
+        int p583=0,p584=0;
+        //               bool TestFlag=false;
+        for(int i=0;i<2;i++)
+        {
+            //设置频率
+            if(i==0)
+            {
+                ptr_N5172B->VIOpSignalGenerator::SetFre("5.83");
+            }
+            else
+            {
+                ptr_N5172B->VIOpSignalGenerator::SetFre("5.84");
+            }
+            AmplUpper=ui->EditamplUP->text().toInt();                               //ampl上限
+            AmplLower=ui->EditamplLW->text().toInt();                               //ampl下限
+            AmplStep=ui->Editamplstep->text().toInt();                              //ampl步长
+            //5.83频点处的灵敏度为0，则程序中断
+            if(i==1&&p583==0)
+            {
+                QMessageBox::information(this,"提示","5.83GHz灵敏度为0，程序结束");
+                return;
+            }
+            //设置功率
+            for(;AmplUpper>=AmplLower;AmplUpper=AmplUpper-AmplStep)
+            {
+                QString TemAmplS=QString::number(AmplUpper);
+                ptr_N5172B->VIOpSignalGenerator::SetAmpl(TemAmplS);                  //输入ampl
+                //QMessageBox::information(this,"此时功率","此时功率"+TemAmplS);            //可以显示此时功率
+                Delay_MSec(200);
+                ptr_N5172B->VIOpSignalGenerator::viop_bertOff();                         //关闭bert
+                ptr_N5172B->VIOpSignalGenerator::viop_bertOn();                          //打开bert
+                Delay_MSec(2000);                                                        //延时约3秒等待BER稳定
+                //返回BERT结果
+                result = ptr_N5172B ->viop_Q_BertResult1();                                //调用viop_Q_BertResult()函数，得到bert测试各项结果的值
+                str_BER = QString(result);	                                                 //得到bert测试下 ber的值 根据测试要求这个值小于10的负五次方的话为合格
+                double strBER=str_BER.toDouble();
+                //写入excel
+                if(strBER>BerStand)
+                {
+                    p583=AmplUpper+1;
+                    AmplLower=AmplUpper+1;
+                    //                           TestFlag=true;
+                }
+                if(strBER>BerStand&&(i!=0))
+                {
+                    p584=AmplUpper+1;
+                    AmplLower=AmplUpper+1;
+                }
+            }
+        }
 
-                  cellA1 = worksheet->querySubObject("Cells(int,int)",row-1,colum);
-                  cellA1->dynamicCall("SetValue(const QVariant&)",str_BER);    //写入误码率
-                  cellA1->setProperty("HorizontalAlignment", -4108);           //居中
-                  cellA1->setProperty("VerticalAlignment", -4108);             //居中
+        QMessageBox::information(this,"此时功率","5.83GHz接收灵敏度"+QString::number(p583,10)+" 5.84GHz接收灵敏度"+QString::number(p584,10));   //可以显示此时功率
 
-                  if(strBER<=BerStand)
-                  {
-                     cellA1 = worksheet->querySubObject("Cells(int,int)",row,colum);
-                     cellA1->dynamicCall("SetValue(const QVariant&)","T");   //写入结果
-                     cellA1->setProperty("HorizontalAlignment", -4108);         //居中
-                     cellA1->setProperty("VerticalAlignment", -4108);           //居中
-                  }
-                  if(strBER>BerStand)
-                  {
-                     cellA1 = worksheet->querySubObject("Cells(int,int)",row,colum);
-                     cellA1->dynamicCall("SetValue(const QVariant&)","F");    //写入结果
-//                          QAxObject *font = cellA1->querySubObject("Font");            //获取单元格字体
-//                          font->setProperty("Bold", "true");                        //设置单元格字体颜色（红色）
-//                          font->setProperty("Color", QColor(255, 0, 0));               //设置单元格字体颜色（红色）
-                     cellA1->setProperty("HorizontalAlignment", -4108);           //居中
-                     cellA1->setProperty("VerticalAlignment", -4108);             //居中
-                  }
-                  colum++;
-              }
-          colum=2;
-          row++;
-          ui->lineEdit_Row->setText(QString::number(row));
-          //芯片号增加
-          chipNum=ui->EditBoard->text().toInt();
-          chipNum++;
-          ui->EditBoard->setText(QString::number(chipNum));//显示下一个芯片号
-          free(result);
-          //关闭文件
-          workbook->dynamicCall("SaveAs(const QString&)",QDir::toNativeSeparators(filepath));
-          workbook->dynamicCall("Close()");                               //关闭工作簿
-          excel->dynamicCall("Quit()");                                   //关闭excel
-          delete excel;
-          excel=nullptr;
-         QMessageBox::information(this,"RX接收灵敏度测试","完成");
+        //5.83和5.84两个频点灵敏度差值过大
+        if(qAbs(p583-p584)>=3)
+        {
+            QMessageBox::information(this,"提示","灵敏度相差过大，程序结束");
+            return;
+        }
 
-     });
+        if(!(ui->lineEditMeansRx->text().isEmpty()))
+        {
+            int MeansAmpl=ui->lineEditMeansRx->text().toInt();
+            //当灵敏度大过平均灵敏度4个点
+            if(qAbs(p583-MeansAmpl)==4)
+            {
+                QMessageBox::information(this,"提示","5.83GHz的功率为"+QString::number(p583,10));
+                return;
+            }
+            //当灵敏度大过平均灵敏度5个点
+            if(qAbs(p583-MeansAmpl)==5)
+            {
+                QMessageBox::information(this,"提示","5.83GHz的功率为"+QString::number(p583,10));
+                return;
+            }
+        }
+
+        //选择文件
+        QString filepath;
+        filepath =QFileDialog::getOpenFileName(nullptr,("选择文件"),("C:/Users/ztp/Desktop"),("*.xls *.xlsx *.csv")); //获取保存路径
+        if(filepath.isEmpty())
+        {
+            QMessageBox::critical(nullptr, "错误信息", "没有找到EXCEL");
+            return;
+        }
+
+        QAxObject *excel = new QAxObject();
+        excel->setControl("ket.Application");                                     //连接WPS
+        excel->dynamicCall("SetVisible(bool Visible)","false");                   //不显示窗体
+        excel->setProperty("DisplayAlerts", false);                               //不显示任何警告信息。如果为true那么在关闭是会出现类似“文件已修改，是否保存”的提示
+        QAxObject* workbooks = excel->querySubObject("WorkBooks");                //获取工作簿集合
+        workbooks->dynamicCall("Open(const QString&)",filepath);                  //打开打开已存在的工作簿
+        QAxObject *workbook = excel->querySubObject("ActiveWorkBook");            //获取当前工作簿
+        QAxObject *worksheets = workbook->querySubObject("WorkSheets");           //获取工作表集合
+        QAxObject *worksheet = worksheets->querySubObject("Item(int)",1);         //获取工作表集合的工作表1，即sheet1
+        QAxObject *cellA;
+
+        if(RxMultTextFirst)
+        {
+            cellA= worksheet->querySubObject("Cells(int,int)",1,1);
+            cellA->dynamicCall("SetValue(const QVariant&)","No.");           //写入数据
+            cellA->setProperty("HorizontalAlignment", -4108);                     //居中
+            cellA->setProperty("VerticalAlignment", -4108);                       //居中
+            cellA = worksheet->querySubObject("Cells(int,int)",1,2);
+            cellA->dynamicCall("SetValue(const QVariant&)","5.83");         //写入数据
+            cellA->setProperty("HorizontalAlignment", -4108);                     //居中
+            cellA->setProperty("VerticalAlignment", -4108);                       //居中]
+            cellA = worksheet->querySubObject("Cells(int,int)",1,3);
+            cellA->dynamicCall("SetValue(const QVariant&)","5.84");         //写入数据
+            cellA->setProperty("HorizontalAlignment", -4108);                     //居中
+            cellA->setProperty("VerticalAlignment", -4108);                       //居中
+            for(int i=0;i<frepotss.length();i++)
+            {
+                cellA= worksheet->querySubObject("Cells(int,int)",1,4+i);
+                cellA->dynamicCall("SetValue(const QVariant&)",frepotss[i]);         //写入数据
+                cellA->setProperty("HorizontalAlignment", -4108);                     //居中
+                cellA->setProperty("VerticalAlignment", -4108);                       //居中
+            }
+            RxMultTextFirst=false;
+        }
+
+        cellA = worksheet->querySubObject("Cells(int,int)",row,1);
+        cellA->dynamicCall("SetValue(const QVariant&)",ui->EditBoard->text());                //
+        cellA->setProperty("HorizontalAlignment", -4108);
+        cellA->setProperty("VerticalAlignment", -4108);
+
+        cellA = worksheet->querySubObject("Cells(int,int)",row,2);
+        cellA->dynamicCall("SetValue(const QVariant&)",p583);                                 //
+        cellA->setProperty("HorizontalAlignment", -4108);
+        cellA->setProperty("VerticalAlignment", -4108);
+
+        cellA = worksheet->querySubObject("Cells(int,int)",row,3);
+        cellA->dynamicCall("SetValue(const QVariant&)",p584);                                       //
+        cellA->setProperty("HorizontalAlignment", -4108);
+        cellA->setProperty("VerticalAlignment", -4108);
+
+        //判断5.83  频率点
+        //功率确定
+        AmplUpper=p583+6;
+        ptr_N5172B->VIOpSignalGenerator::SetAmpl(QString::number(AmplUpper));                  //输入ampl
+        for(int i=0;i<5;i++)
+        {
+            ptr_N5172B->VIOpSignalGenerator::SetFre(frepotss[i]);
+            ptr_N5172B->VIOpSignalGenerator::SetAmpl(QString::number(AmplUpper));                  //输入ampl
+            Delay_MSec(200);
+            ptr_N5172B->VIOpSignalGenerator::viop_bertOff();                         //关闭bert
+            ptr_N5172B->VIOpSignalGenerator::viop_bertOn();                          //打开bert
+            Delay_MSec(2000);                                                        //延时约3秒等待BER稳定
+            //返回BERT结果
+            result = ptr_N5172B ->viop_Q_BertResult1();                                //调用viop_Q_BertResult()函数，得到bert测试各项结果的值
+            str_BER = QString(result);	                                                 //得到bert测试下 ber的值 根据测试要求这个值小于10的负五次方的话为合格
+            double strBER=str_BER.toDouble();
+            if(strBER<=BerStand)                   //判断数据
+            {
+                QAxObject *cellA0 = worksheet->querySubObject("Cells(int,int)",row,4+i);
+                cellA0->dynamicCall("SetValue(const QVariant&)","T");
+                cellA0->setProperty("HorizontalAlignment", -4108);                          //居中
+                cellA0->setProperty("VerticalAlignment", -4108);                            //居中
+            }
+            else
+            {
+                QAxObject *cellA0 = worksheet->querySubObject("Cells(int,int)",row,4+i);
+                cellA0->dynamicCall("SetValue(const QVariant&)","F");                   //写入板号
+                QAxObject *font = cellA0->querySubObject("Font");            //获取单元格字体
+                font->setProperty("Color", QColor(255, 0, 0));               //设置单元格字体颜色（红色）
+                font->setProperty("Bold", true);
+                cellA0->setProperty("HorizontalAlignment", -4108);                          //居中
+                cellA0->setProperty("VerticalAlignment", -4108);                            //居中
+            }
+        }
+        //判断5.84  频率点
+        //功率确定
+        AmplUpper=p584+6;
+        for(int i=5;i<(frepotss.length());i++)
+        {
+            ptr_N5172B->VIOpSignalGenerator::SetFre(frepotss[i]);
+            ptr_N5172B->VIOpSignalGenerator::SetAmpl(QString::number(AmplUpper));                  //输入ampl
+            Delay_MSec(200);
+            ptr_N5172B->VIOpSignalGenerator::viop_bertOff();                         //关闭bert
+            ptr_N5172B->VIOpSignalGenerator::viop_bertOn();                          //打开bert
+            Delay_MSec(2000);                                                        //延时约3秒等待BER稳定
+            //返回BERT结果
+            result = ptr_N5172B ->viop_Q_BertResult();                                //调用viop_Q_BertResult()函数，得到bert测试各项结果的值
+            str_BER = QString(result);	                                                 //得到bert测试下 ber的值 根据测试要求这个值小于10的负五次方的话为合格
+            double strBER=str_BER.toDouble();
+            if(strBER<=BerStand)                   //判断数据
+            {
+                cellA= worksheet->querySubObject("Cells(int,int)",row,4+i);
+                cellA->dynamicCall("SetValue(const QVariant&)","T");
+                cellA->setProperty("HorizontalAlignment", -4108);                          //居中
+                cellA->setProperty("VerticalAlignment", -4108);                            //居中
+            }
+            else
+            {
+                cellA = worksheet->querySubObject("Cells(int,int)",row,4+i);
+                cellA->dynamicCall("SetValue(const QVariant&)","F");
+                QAxObject *font = cellA->querySubObject("Font");            //获取单元格字体
+                font->setProperty("Color", QColor(255, 0, 0));               //设置单元格字体颜色（红色）
+                font->setProperty("Bold", true);                             //设置单元格字体加粗
+                cellA->setProperty("HorizontalAlignment", -4108);                          //居中
+                cellA->setProperty("VerticalAlignment", -4108);                            //居中
+            }
+        }
+        //excel行数增加
+        row++;    //全局变量，行数加一
+        ui->lineEdit_Row->setText(QString::number(row));
+
+        //芯片号增加
+        int chiNumMulRx;
+        chiNumMulRx=ui->EditBoard->text().toInt();                               //记录芯片号
+        chiNumMulRx++;
+        ui->EditBoard->setText(QString::number(chiNumMulRx));//显示下一个芯片号
+        frepotss.clear();
+        free(result);
+        //               delete [] frepotss;
+        //关闭文件
+        workbook->dynamicCall("SaveAs(const QString&)",QDir::toNativeSeparators(filepath));
+        workbook->dynamicCall("Close()");                              //关闭工作簿
+        excel->dynamicCall("Quit()");                                  //关闭excel
+        delete excel;
+        excel=nullptr;
+        QMessageBox::information(this,"RX接收灵敏度测试","完成");
+    });
+
+    //Rx最大功率测量
+    connect(ui->btnRxMax,&QPushButton::clicked,[&]()
+    {
+        QString textLab;
+        ToalBits=ui->EditTolBits->text();
+        ptr_N5172B->VIOpSignalGenerator::viop_realtimeOn();                  //realtime
+        ptr_N5172B->VIOpSignalGenerator::viop_modulationType();              //设置ASK
+        ptr_N5172B->VIOpSignalGenerator::viop_alpha();                       //设置阿尔法为1
+        ptr_N5172B->VIOpSignalGenerator::viop_alphaDepth();                  //85%
+        ptr_N5172B->VIOpSignalGenerator::viop_symbolRate(512);               //symbol rate 默认单位Ksps
+        ptr_N5172B->VIOpSignalGenerator::viop_loadData();                    //load文件PN9-1FF-FM0
+        ptr_N5172B->VIOpSignalGenerator::viop_displayMode(SCIENTIFIC);       //科学计数法显示误码率
+        ptr_N5172B->VIOpSignalGenerator::viop_BERTtriggerSource(IMM);        //trigger-immediate
+        ptr_N5172B->VIOpSignalGenerator::viop_totalBit(ToalBits);            //设置totalBit为1千万
+        ptr_N5172B->VIOpSignalGenerator::viop_MODOn();
+        ptr_N5172B->VIOpSignalGenerator::viop_RFOn();                         //打开RF
+        ptr_N5172B->VIOpSignalGenerator::viop_bertOn();                       //打开
+
+        ptr_N5172B->VIOpSignalGenerator::SetFre(ui->RxMaxFre->text());                       //设置频率
+        textLab=ui->EditBoard->text()+"号 "+ui->RxMaxFre->text();
+
+
+        //  根据实际赋值
+        AmplUpper=ui->RxMaxRan->text().toInt();                               //ampl上限
+        AmplLower=ui->RxMaxPoint->text().toInt()+6;                           //ampl下限
+        AmplStep=ui->RxMaxStep->text().toInt();                            //ampl步长
+
+        BerStand=ui->EditBer->text().toDouble();                            //误码率
+
+        //检查输入情况
+        if(AmplUpper<AmplLower)
+        {
+            QMessageBox::information(this,"错误","数值输入错误");
+            return;
+        }
+        //选择文件
+        QString filepath;
+        filepath =QFileDialog::getOpenFileName(nullptr,("选择文件"),("C:/Users/ztp/Desktop"),("*.xls *.xlsx *.csv")); //获取保存路径
+        if(filepath.isEmpty())
+        {
+            QMessageBox::critical(nullptr, "错误信息", "没有找到EXCEL");
+            return;
+        }
+        QAxObject *excel = new QAxObject();
+        excel->setControl("ket.Application");                                     //连接WPS
+        excel->dynamicCall("SetVisible(bool Visible)","false");                   //不显示窗体
+        excel->setProperty("DisplayAlerts", false);                               //不显示任何警告信息。如果为true那么在关闭是会出现类似“文件已修改，是否保存”的提示
+        QAxObject* workbooks = excel->querySubObject("WorkBooks");                //获取工作簿集合
+        workbooks->dynamicCall("Open(const QString&)",filepath);                  //打开打开已存在的工作簿
+        QAxObject *workbook = excel->querySubObject("ActiveWorkBook");            //获取当前工作簿
+        QAxObject *worksheets = workbook->querySubObject("WorkSheets");           //获取工作表集合
+        QAxObject *worksheet = worksheets->querySubObject("Item(int)",1);         //获取工作表集合的工作表1，即sheet1
+        QAxObject *cellA1;
+
+        if(RxMaxFirst)
+        {
+            cellA1 = worksheet->querySubObject("Cells(int,int)",1,1);
+            cellA1->dynamicCall("SetValue(const QVariant&)","Rx最大功率测试");         //写入数据
+            cellA1->setProperty("HorizontalAlignment", -4108);                     //居中
+            cellA1->setProperty("VerticalAlignment", -4108);                       //居中
+            RxMaxFirst=false;
+        }
+
+        textLab=ui->EditBoard->text()+ textLab;
+        cellA1= worksheet->querySubObject("Cells(int,int)",row++,1);
+        cellA1->dynamicCall("SetValue(const QVariant&)",textLab);                   //写入板号
+        cellA1->setProperty("HorizontalAlignment", -4108);                          //居中
+        cellA1->setProperty("VerticalAlignment", -4108);                            //居中
+        int colum=2;
+
+        // 第二行数据进行操作
+        cellA1 = worksheet->querySubObject("Cells(int,int)",row++,1);
+        cellA1->dynamicCall("SetValue(const QVariant&)","功率(dBm)");         //写入功率
+        cellA1->setProperty("HorizontalAlignment", -4108);                   //居中
+        cellA1->setProperty("VerticalAlignment", -4108);                     //居中
+
+        cellA1 = worksheet->querySubObject("Cells(int,int)",row++,1);
+        cellA1->dynamicCall("SetValue(const QVariant&)","误码率");             //写入误码率
+        cellA1->setProperty("HorizontalAlignment", -4108);                    //居中
+        cellA1->setProperty("VerticalAlignment", -4108);                      //居中
+        cellA1 = worksheet->querySubObject("Cells(int,int)",row,1);
+        cellA1->dynamicCall("SetValue(const QVariant&)","结果");               //写入结果
+        cellA1->setProperty("HorizontalAlignment", -4108);                    //居中
+        cellA1->setProperty("VerticalAlignment", -4108);                      //居中
+
+        //功率循环
+        for(;AmplLower<AmplUpper;AmplLower=AmplLower+AmplStep)
+        {
+            QString TemAmplS=QString::number(AmplLower);
+            ptr_N5172B->VIOpSignalGenerator::SetAmpl(TemAmplS);                  //输入ampl
+            Delay_MSec(100);
+            ptr_N5172B->VIOpSignalGenerator::viop_bertOff();                         //关闭bert
+            ptr_N5172B->VIOpSignalGenerator::viop_bertOn();                          //打开bert
+            Delay_MSec(2000);                                                        //延时约4秒等待BER稳定
+            //返回BERT结果
+            result = ptr_N5172B ->viop_Q_BertResult1();                               //调用viop_Q_BertResult()函数，得到bert测试各项结果的值
+            //                       p = strtok(result,d);
+            //                       str_totalBits=QString(p);           //得到bert测试下 totalBits的值
+            //                       p = strtok(nullptr, d);
+            //                       str_errorBits = QString(p);        //得到bert测试下 errorBits
+            //                       p = strtok(nullptr, d);
+            str_BER = QString(result);	               //得到bert测试下 ber的值 根据测试要求这个值小于10的负五次方的话为合格
+            double strBER=str_BER.toDouble();
+
+            //写入excel
+            cellA1 = worksheet->querySubObject("Cells(int,int)",row-2,colum);
+            cellA1->dynamicCall("SetValue(const QVariant&)",TemAmplS);   //写入功率
+            cellA1->setProperty("HorizontalAlignment", -4108);           //居中
+            cellA1->setProperty("VerticalAlignment", -4108);             //居中
+
+            cellA1 = worksheet->querySubObject("Cells(int,int)",row-1,colum);
+            cellA1->dynamicCall("SetValue(const QVariant&)",str_BER);    //写入误码率
+            cellA1->setProperty("HorizontalAlignment", -4108);           //居中
+            cellA1->setProperty("VerticalAlignment", -4108);             //居中
+
+            if(strBER<=BerStand)
+            {
+                cellA1 = worksheet->querySubObject("Cells(int,int)",row,colum);
+                cellA1->dynamicCall("SetValue(const QVariant&)","T");   //写入结果
+                cellA1->setProperty("HorizontalAlignment", -4108);         //居中
+                cellA1->setProperty("VerticalAlignment", -4108);           //居中
+            }
+            if(strBER>BerStand)
+            {
+                cellA1 = worksheet->querySubObject("Cells(int,int)",row,colum);
+                cellA1->dynamicCall("SetValue(const QVariant&)","F");    //写入结果
+                //                          QAxObject *font = cellA1->querySubObject("Font");            //获取单元格字体
+                //                          font->setProperty("Bold", "true");                        //设置单元格字体颜色（红色）
+                //                          font->setProperty("Color", QColor(255, 0, 0));               //设置单元格字体颜色（红色）
+                cellA1->setProperty("HorizontalAlignment", -4108);           //居中
+                cellA1->setProperty("VerticalAlignment", -4108);             //居中
+            }
+            colum++;
+        }
+        colum=2;
+        row++;
+        ui->lineEdit_Row->setText(QString::number(row));
+        //芯片号增加
+        chipNum=ui->EditBoard->text().toInt();
+        chipNum++;
+        ui->EditBoard->setText(QString::number(chipNum));//显示下一个芯片号
+        free(result);
+        //关闭文件
+        workbook->dynamicCall("SaveAs(const QString&)",QDir::toNativeSeparators(filepath));
+        workbook->dynamicCall("Close()");                               //关闭工作簿
+        excel->dynamicCall("Quit()");                                   //关闭excel
+        delete excel;
+        excel=nullptr;
+        QMessageBox::information(this,"RX接收灵敏度测试","完成");
+
+    });
 
     //设置功率
-      connect(ui->btn_power,&QPushButton::clicked,[&]()
-      {
-         ptr_N5172B->VIOpSignalGenerator::viop_cwAmpl(ui->lEdit_N5172B_Power->text());
-      });
+    connect(ui->btn_power,&QPushButton::clicked,[&]()
+    {
+        ptr_N5172B->VIOpSignalGenerator::viop_cwAmpl(ui->lEdit_N5172B_Power->text());
+    });
 
-//       connect(ui->btn_TRx,&QPushButton::clicked,[&]()
-//       {
-//           ptr_N5172B->VIOpSignalGenerator::viop_bertOn();                       //打开
-//            ptr_N5172B->VIOpSignalGenerator::SetFre("5.83");
-//           for(int i=-70;i>-80;i--)
-//           {
-//                ptr_N5172B->VIOpSignalGenerator::SetAmpl(QString::number(i));
-//                Delay_MSec(200);
-//                ptr_N5172B->VIOpSignalGenerator::viop_bertOff();                       //打开
-//                ptr_N5172B->VIOpSignalGenerator::viop_bertOn();                       //打开
-//                Delay_MSec(2000);
-//                result= ptr_N5172B ->viop_Q_BertResult1();
-//               QString s=result;
-//               QMessageBox::information(this,"数据读取完成",s);
-//           }
-//          QMessageBox::information(this,"数据读取完成","完成");
+    //       connect(ui->btn_TRx,&QPushButton::clicked,[&]()
+    //       {
+    //           ptr_N5172B->VIOpSignalGenerator::viop_bertOn();                       //打开
+    //            ptr_N5172B->VIOpSignalGenerator::SetFre("5.83");
+    //           for(int i=-70;i>-80;i--)
+    //           {
+    //                ptr_N5172B->VIOpSignalGenerator::SetAmpl(QString::number(i));
+    //                Delay_MSec(200);
+    //                ptr_N5172B->VIOpSignalGenerator::viop_bertOff();                       //打开
+    //                ptr_N5172B->VIOpSignalGenerator::viop_bertOn();                       //打开
+    //                Delay_MSec(2000);
+    //                result= ptr_N5172B ->viop_Q_BertResult1();
+    //               QString s=result;
+    //               QMessageBox::information(this,"数据读取完成",s);
+    //           }
+    //          QMessageBox::information(this,"数据读取完成","完成");
 
-//      });
+    //      });
 
 
-     //设置频率
-      connect(ui->btn_fre,&QPushButton::clicked,[&]()
-      {
-           int Unit;
-           if(ui->btnRadioKHz->isChecked())
-           {
-               Unit=KHz;
-           }
-           else if(ui->btnRadioMHz->isChecked())
-           {
-               Unit=MHz;
-           }
-           else{
-               Unit=GHz;
-           }
-         ptr_N5172B-> VIOpSignalGenerator::viop_cwFreq(ui->lEdit_N5172B_Freq->text(), Unit);
-       });
+    //设置频率
+    connect(ui->btn_fre,&QPushButton::clicked,[&]()
+    {
+        int Unit;
+        if(ui->btnRadioKHz->isChecked())
+        {
+            Unit=KHz;
+        }
+        else if(ui->btnRadioMHz->isChecked())
+        {
+            Unit=MHz;
+        }
+        else{
+            Unit=GHz;
+        }
+        ptr_N5172B-> VIOpSignalGenerator::viop_cwFreq(ui->lEdit_N5172B_Freq->text(), Unit);
+    });
 
     //打开/关闭bert
     connect(ui->btnBERTOnOff,&QPushButton::clicked,[&]()
     {
         if(bertKey)
         {
-          ptr_N5172B->VIOpSignalGenerator::viop_bertOn();               //打开
-          bertKey=false;
+            ptr_N5172B->VIOpSignalGenerator::viop_bertOn();               //打开
+            bertKey=false;
         }else
         {
-           ptr_N5172B->VIOpSignalGenerator::viop_bertOff();             //关闭
-           bertKey=true;
+            ptr_N5172B->VIOpSignalGenerator::viop_bertOff();             //关闭
+            bertKey=true;
         }
     });
 
@@ -1789,27 +2131,27 @@ MainWindow::MainWindow(QWidget *parent) :
         {
             ui->tblWidget->setColumnCount(columIndex + 1);  //总列数增加1
         }
-         ui->tblWidget->setVerticalHeaderLabels(QStringList()<<"频率"<<"功率");          //设置表头
-         ui->tblWidget->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
-         ui->tblWidget->verticalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+        ui->tblWidget->setVerticalHeaderLabels(QStringList()<<"频率"<<"功率");          //设置表头
+        ui->tblWidget->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+        ui->tblWidget->verticalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     });
 
     //添加行
     connect(ui->btnTablAddRow,&QPushButton::clicked,[&]()
     {
-         int rowIndex = ui->tblWidget->rowCount();         //行总数
-         int rowCurrent = ui->tblWidget->currentRow();     //当前行
-         if(rowCurrent!=-1)
-         {
-             ui->tblWidget->insertRow(rowCurrent+1);    //当前列前面增加1
-         }
-         else
-         {
-             ui->tblWidget->setRowCount(rowIndex + 1);  //总列数增加1
-         }
-         ui->tblWidget->setVerticalHeaderLabels(QStringList()<<"频率"<<"功率");          //设置表头
-         ui->tblWidget->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
-         ui->tblWidget->verticalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+        int rowIndex = ui->tblWidget->rowCount();         //行总数
+        int rowCurrent = ui->tblWidget->currentRow();     //当前行
+        if(rowCurrent!=-1)
+        {
+            ui->tblWidget->insertRow(rowCurrent+1);    //当前列前面增加1
+        }
+        else
+        {
+            ui->tblWidget->setRowCount(rowIndex + 1);  //总列数增加1
+        }
+        ui->tblWidget->setVerticalHeaderLabels(QStringList()<<"频率"<<"功率");          //设置表头
+        ui->tblWidget->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+        ui->tblWidget->verticalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     });
 
     //删除选中列
@@ -1820,7 +2162,7 @@ MainWindow::MainWindow(QWidget *parent) :
         msgBox=new QMessageBox("删除列","是否删除选中列",QMessageBox::Information,	QMessageBox::Yes | QMessageBox::Default,QMessageBox::No | QMessageBox::Escape,0);
         if(msgBox->exec() == QMessageBox::No)
         {
-             return;
+            return;
         }
         int columIndex = ui->tblWidget-> currentColumn();
         if (columIndex != -1)
@@ -1837,7 +2179,7 @@ MainWindow::MainWindow(QWidget *parent) :
         msgBox=new QMessageBox("删除行","是否删除选中行",QMessageBox::Information,	QMessageBox::Yes | QMessageBox::Default,QMessageBox::No | QMessageBox::Escape,0);
         if(msgBox->exec() == QMessageBox::No)
         {
-             return;
+            return;
         }
         int rowIndex = ui->tblWidget->currentRow();
         if (rowIndex != -1)
@@ -1847,89 +2189,89 @@ MainWindow::MainWindow(QWidget *parent) :
         ui->tblWidget->verticalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     });
 
-     connect(ui->btnRxLoadData,&QPushButton::clicked,[&]()
-      {
-         QAxObject *cell;
-         QString filepath;
-         QVariant cell_value;
-         QAxObject *range;
-         QString strVal;
+    connect(ui->btnRxLoadData,&QPushButton::clicked,[&]()
+    {
+        QAxObject *cell;
+        QString filepath;
+        QVariant cell_value;
+        QAxObject *range;
+        QString strVal;
 
-         int rowIndex = ui->tblWidget->rowCount();         //ui界面 行总数
-         int columIndex = ui->tblWidget->columnCount();    //ui界面 列总数
-         filepath =QFileDialog::getOpenFileName(nullptr,("选择文件"),("C:/Users/ztp/Desktop"),("*.xls *.xlsx *.csv")); //获取保存路径
-         if(filepath.isEmpty())
-         {
-             QMessageBox::critical(nullptr, "错误信息", "没有找到EXCEL");
-                 return;
-         }
-         QAxObject *excel = new QAxObject();
-         excel->setControl("ket.Application");                                     //连接WPS
-         excel->dynamicCall("SetVisible(bool Visible)","false");                   //不显示窗体
-         excel->setProperty("DisplayAlerts", false);                               //不显示任何警告信息。如果为true那么在关闭是会出现类似“文件已修改，是否保存”的提示
-         QAxObject* workbooks = excel->querySubObject("WorkBooks");                //获取工作簿集合
-         workbooks->dynamicCall("Open(const QString&)",filepath);                  //打开打开已存在的工作簿
-         QAxObject *workbook = excel->querySubObject("ActiveWorkBook");            //获取当前工作簿
-         QAxObject *worksheets = workbook->querySubObject("WorkSheets");           //获取工作表集合
-         QAxObject *worksheet = worksheets->querySubObject("Item(int)",1);         //获取工作表集合的工作表1，即sheet1
-         QAxObject *usedRange = worksheet->querySubObject("UsedRange");            //获取表格中的数据范围
-         QAxObject *rows =usedRange->querySubObject("Rows");
-         QAxObject *columns = usedRange->querySubObject("Columns");
-         int row_start =usedRange->property("Row").toInt();              //获取起始行
-         int column_start = usedRange->property("Column").toInt();       //获取起始列
-         int row_count = rows->property("Count").toInt();                //获取行数
-         int column_count = columns->property("Count").toInt();         //获取列数
-         //防止数据量大于当前单元格数量
-
-         if(row_count>rowIndex)
-         {
-             ui->tblWidget->setRowCount(row_count);
-         }
-         if(column_count>columIndex)
-         {
-             ui->tblWidget->setRowCount(column_count);
-         }
-
-         //写数据
-         for(int i=row_start;i<=row_count;i++)
-         {
-             for(int j=column_start;j<=column_count;j++)
-             {
-                  cell= worksheet->querySubObject("Cells(int,int)", i, j);
-                  cell_value= cell->property("Value");                //获取单元格内容
-                  range= worksheet->querySubObject("Cells(int,int)",i,j); //获取cell的值
-                  strVal= range->dynamicCall("Value2()").toString();
-                  ui->tblWidget->setItem(i-1,j-1,new QTableWidgetItem(strVal));
-             }
-         }
-
-         //清除其余单元格数据
-         for(int i=0;i<rowIndex;i++)
-         {
-             for(int j=column_count;j<columIndex;j++)
-             {
-                    ui->tblWidget->setItem(i,j,new QTableWidgetItem(""));
-             }
-         }
-       //关闭文件
-         workbook->dynamicCall("SaveAs(const QString&)",QDir::toNativeSeparators(filepath));
-         workbook->dynamicCall("Close()");                              //关闭工作簿
-         excel->dynamicCall("Quit()");                                  //关闭excel
-         delete excel;
-         excel=nullptr;
-         QMessageBox::information(this,"数据读取完成","完成");
-       });
-
-     //Rx跳点测试
-     connect(ui->btnMulPots,&QPushButton::clicked,[&]()
-     {
-       if((ui->tblWidget->item(0,0)->text().isEmpty())||(ui->tblWidget->item(0,1)->text().isEmpty()))
-         {
-           QMessageBox::information(this,"请检查输入数据","确认");
+        int rowIndex = ui->tblWidget->rowCount();         //ui界面 行总数
+        int columIndex = ui->tblWidget->columnCount();    //ui界面 列总数
+        filepath =QFileDialog::getOpenFileName(nullptr,("选择文件"),("C:/Users/ztp/Desktop"),("*.xls *.xlsx *.csv")); //获取保存路径
+        if(filepath.isEmpty())
+        {
+            QMessageBox::critical(nullptr, "错误信息", "没有找到EXCEL");
             return;
-         }
+        }
+        QAxObject *excel = new QAxObject();
+        excel->setControl("ket.Application");                                     //连接WPS
+        excel->dynamicCall("SetVisible(bool Visible)","false");                   //不显示窗体
+        excel->setProperty("DisplayAlerts", false);                               //不显示任何警告信息。如果为true那么在关闭是会出现类似“文件已修改，是否保存”的提示
+        QAxObject* workbooks = excel->querySubObject("WorkBooks");                //获取工作簿集合
+        workbooks->dynamicCall("Open(const QString&)",filepath);                  //打开打开已存在的工作簿
+        QAxObject *workbook = excel->querySubObject("ActiveWorkBook");            //获取当前工作簿
+        QAxObject *worksheets = workbook->querySubObject("WorkSheets");           //获取工作表集合
+        QAxObject *worksheet = worksheets->querySubObject("Item(int)",1);         //获取工作表集合的工作表1，即sheet1
+        QAxObject *usedRange = worksheet->querySubObject("UsedRange");            //获取表格中的数据范围
+        QAxObject *rows =usedRange->querySubObject("Rows");
+        QAxObject *columns = usedRange->querySubObject("Columns");
+        int row_start =usedRange->property("Row").toInt();              //获取起始行
+        int column_start = usedRange->property("Column").toInt();       //获取起始列
+        int row_count = rows->property("Count").toInt();                //获取行数
+        int column_count = columns->property("Count").toInt();         //获取列数
+        //防止数据量大于当前单元格数量
+
+        if(row_count>rowIndex)
+        {
+            ui->tblWidget->setRowCount(row_count);
+        }
+        if(column_count>columIndex)
+        {
+            ui->tblWidget->setRowCount(column_count);
+        }
+
+        //写数据
+        for(int i=row_start;i<=row_count;i++)
+        {
+            for(int j=column_start;j<=column_count;j++)
+            {
+                cell= worksheet->querySubObject("Cells(int,int)", i, j);
+                cell_value= cell->property("Value");                //获取单元格内容
+                range= worksheet->querySubObject("Cells(int,int)",i,j); //获取cell的值
+                strVal= range->dynamicCall("Value2()").toString();
+                ui->tblWidget->setItem(i-1,j-1,new QTableWidgetItem(strVal));
+            }
+        }
+
+        //清除其余单元格数据
+        for(int i=0;i<rowIndex;i++)
+        {
+            for(int j=column_count;j<columIndex;j++)
+            {
+                ui->tblWidget->setItem(i,j,new QTableWidgetItem(""));
+            }
+        }
+        //关闭文件
+        workbook->dynamicCall("SaveAs(const QString&)",QDir::toNativeSeparators(filepath));
+        workbook->dynamicCall("Close()");                              //关闭工作簿
+        excel->dynamicCall("Quit()");                                  //关闭excel
+        delete excel;
+        excel=nullptr;
+        QMessageBox::information(this,"数据读取完成","完成");
+    });
+
+    //Rx跳点测试
+    connect(ui->btnMulPots,&QPushButton::clicked,[&]()
+    {
+        if((ui->tblWidget->item(0,0)->text().isEmpty())||(ui->tblWidget->item(0,1)->text().isEmpty()))
+        {
+            QMessageBox::information(this,"请检查输入数据","确认");
+            return;
+        }
         QStringList frepotss,amplpots;
-//        int rowIndex = ui->tblWidget->rowCount();         //ui界面 行总数
+        //        int rowIndex = ui->tblWidget->rowCount();         //ui界面 行总数
         int columIndex = ui->tblWidget->columnCount();    //ui界面 列总数
 
         for(int i=0;i<2;i++)
@@ -1940,7 +2282,7 @@ MainWindow::MainWindow(QWidget *parent) :
                 {
                     if(i==0)
                     {
-                      frepotss.append(ui->tblWidget->item(i,j)->text());
+                        frepotss.append(ui->tblWidget->item(i,j)->text());
                     }
                     else
                     {
@@ -1950,9 +2292,9 @@ MainWindow::MainWindow(QWidget *parent) :
 
             }
         }
-//         QMessageBox::information(this,"",QString::number(frepotss.length()));
-//          QMessageBox::information(this,"",QString::number(amplpots.length()));
-//          return;
+        //         QMessageBox::information(this,"",QString::number(frepotss.length()));
+        //          QMessageBox::information(this,"",QString::number(amplpots.length()));
+        //          return;
 
         //选择文件
         QString filepaths;
@@ -1960,7 +2302,7 @@ MainWindow::MainWindow(QWidget *parent) :
         if(filepaths.isEmpty())
         {
             QMessageBox::critical(nullptr, "错误信息", "没有找到EXCEL");
-                return;
+            return;
         }
 
         QAxObject *excel = new QAxObject();
@@ -1981,7 +2323,7 @@ MainWindow::MainWindow(QWidget *parent) :
             cellA0= worksheet->querySubObject("Cells(int,int)",1,1);
             cellA0->dynamicCall("SetValue(const QVariant&)","No.");      //序列
             font= cellA0->querySubObject("Font");            //获取单元格字体
-//            font->setProperty("Bold", true);                             //设置单元格字体加粗
+            //            font->setProperty("Bold", true);                             //设置单元格字体加粗
             cellA0->setProperty("HorizontalAlignment", -4108);                          //居中
             cellA0->setProperty("VerticalAlignment", -4108);                            //居中
 
@@ -1989,12 +2331,12 @@ MainWindow::MainWindow(QWidget *parent) :
             {
                 for(int j=0;j<amplpots.length();j++)
                 {
-                      cellA0= worksheet->querySubObject("Cells(int,int)",1,excelColum++);
-                      cellA0->dynamicCall("SetValue(const QVariant&)",frepotss[i]+"GHz"+amplpots[j]+"dBm");
-                      font=cellA0->querySubObject("Font");                                        //获取单元格字体
-//                      font->setProperty("Bold", true);                                            //设置单元格字体加粗
-                      cellA0->setProperty("HorizontalAlignment", -4108);                          //居中
-                      cellA0->setProperty("VerticalAlignment", -4108);                            //居中
+                    cellA0= worksheet->querySubObject("Cells(int,int)",1,excelColum++);
+                    cellA0->dynamicCall("SetValue(const QVariant&)",frepotss[i]+"GHz"+amplpots[j]+"dBm");
+                    font=cellA0->querySubObject("Font");                                        //获取单元格字体
+                    //                      font->setProperty("Bold", true);                                            //设置单元格字体加粗
+                    cellA0->setProperty("HorizontalAlignment", -4108);                          //居中
+                    cellA0->setProperty("VerticalAlignment", -4108);                            //居中
                 }
             }
             RxMulPotsTestFirst=false;
@@ -2027,29 +2369,29 @@ MainWindow::MainWindow(QWidget *parent) :
             Delay_MSec(500);
             for(int j=0;j<=amplpots.length()-1;j++)
             {
-               ptr_N5172B->VIOpSignalGenerator::SetAmpl(amplpots[j]);               //输入ampl
-               Delay_MSec(200);
-               ptr_N5172B->VIOpSignalGenerator::viop_bertOff();                         //关闭bert
-               ptr_N5172B->VIOpSignalGenerator::viop_bertOn();                          //打开bert
-               Delay_MSec(2000);                                                        //延时约3秒等待BER稳定
-              //返回BERT结果
-               result = ptr_N5172B ->viop_Q_BertResult1();                                //调用viop_Q_BertResult()函数，得到bert测试各项结果的值
-               str_BER = QString(result);	                                                 //得到bert测试下 ber的值 根据测试要求这个值小于10的负五次方的话为合格
-               double strBER=str_BER.toDouble();
-               if(strBER<=BerStand)                                                      //判断数据
-               {
-                   cellA0 = worksheet->querySubObject("Cells(int,int)",row,excelColum++);
-                   cellA0->dynamicCall("SetValue(const QVariant&)","T");
-                   cellA0->setProperty("HorizontalAlignment", -4108);                          //居中
-                   cellA0->setProperty("VerticalAlignment", -4108);                            //居中
-               }
-               else
-               {
-                   cellA0 = worksheet->querySubObject("Cells(int,int)",row,excelColum++);
-                   cellA0->dynamicCall("SetValue(const QVariant&)","F");                   //写入板号
-                   cellA0->setProperty("HorizontalAlignment", -4108);                      //居中
-                   cellA0->setProperty("VerticalAlignment", -4108);                         //居中
-               }
+                ptr_N5172B->VIOpSignalGenerator::SetAmpl(amplpots[j]);               //输入ampl
+                Delay_MSec(200);
+                ptr_N5172B->VIOpSignalGenerator::viop_bertOff();                         //关闭bert
+                ptr_N5172B->VIOpSignalGenerator::viop_bertOn();                          //打开bert
+                Delay_MSec(2000);                                                        //延时约3秒等待BER稳定
+                //返回BERT结果
+                result = ptr_N5172B ->viop_Q_BertResult1();                                //调用viop_Q_BertResult()函数，得到bert测试各项结果的值
+                str_BER = QString(result);	                                                 //得到bert测试下 ber的值 根据测试要求这个值小于10的负五次方的话为合格
+                double strBER=str_BER.toDouble();
+                if(strBER<=BerStand)                                                      //判断数据
+                {
+                    cellA0 = worksheet->querySubObject("Cells(int,int)",row,excelColum++);
+                    cellA0->dynamicCall("SetValue(const QVariant&)","T");
+                    cellA0->setProperty("HorizontalAlignment", -4108);                          //居中
+                    cellA0->setProperty("VerticalAlignment", -4108);                            //居中
+                }
+                else
+                {
+                    cellA0 = worksheet->querySubObject("Cells(int,int)",row,excelColum++);
+                    cellA0->dynamicCall("SetValue(const QVariant&)","F");                   //写入板号
+                    cellA0->setProperty("HorizontalAlignment", -4108);                      //居中
+                    cellA0->setProperty("VerticalAlignment", -4108);                         //居中
+                }
             }
         }
 
@@ -2071,174 +2413,174 @@ MainWindow::MainWindow(QWidget *parent) :
         delete excel;
         excel=nullptr;
         QMessageBox::information(this,"RX接收灵敏度测试","完成");
-     });
+    });
 
-     connect(ui->btnTxEx,&QPushButton::clicked,[&]()
-     {
-         QString str="Tx输出功率范围测试\
-                 测试目的：该测试利用输出芯片输出信号在频谱仪上观察波形峰值处的功率值，程序自动记录    \
-                 连接设置：pc连接芯片，芯片输出端连接频谱仪。PC和频谱仪需要用网线连接。    \
-                 芯片配置文件：  \
-                 CPC5801803_TX_test_5790_MAX_20200831.txt   \
-                 具体流程：       \
-                 1）确保所有的数据线都已经连接好，给芯片配置好文件   \
-                 2）根据芯片配置文件设置频谱仪频率和span参数    \
-                 3）选择写入的excel文件。注意只有在第一颗芯片测量过程中，点击一次该按钮。\
-                 4）写入数据。整个测量过程主要点击写入按钮。    \
-                 这一步程序会自动检测频谱仪peak处的功率值并记录在excel中\
-                 5）结束程序，释放excel。注意最后一颗芯片测完才能点击\
-                 由于这项测试针对芯片所进行的操作比较少，所以为了减少程序对计算机的资源消耗，整个excel操作的线程不释放，直到点击结束按钮。";
+    connect(ui->btnTxEx,&QPushButton::clicked,[&]()
+    {
+        QString str="Tx输出功率范围测试\
+                测试目的：该测试利用输出芯片输出信号在频谱仪上观察波形峰值处的功率值，程序自动记录    \
+                连接设置：pc连接芯片，芯片输出端连接频谱仪。PC和频谱仪需要用网线连接。    \
+                芯片配置文件：  \
+                CPC5801803_TX_test_5790_MAX_20200831.txt   \
+                具体流程：       \
+                1）确保所有的数据线都已经连接好，给芯片配置好文件   \
+                2）根据芯片配置文件设置频谱仪频率和span参数    \
+                3）选择写入的excel文件。注意只有在第一颗芯片测量过程中，点击一次该按钮。\
+                4）写入数据。整个测量过程主要点击写入按钮。    \
+                这一步程序会自动检测频谱仪peak处的功率值并记录在excel中\
+                5）结束程序，释放excel。注意最后一颗芯片测完才能点击\
+                由于这项测试针对芯片所进行的操作比较少，所以为了减少程序对计算机的资源消耗，整个excel操作的线程不释放，直到点击结束按钮。";
 
-        ui->plainTextEdit->setPlainText(str);
-     });
-     connect(ui->btnRxEx,&QPushButton::clicked,[&]()
-     {
-         QString str="1、Rx灵敏度测试\
-                 测试目的：判断芯片在某一频率下、能够满足误码率要求（通常是，其他涉及误码率的测试，均以此值为标准）的灵敏度下限。\
-                 连接设置：pc连接芯片，芯片连接N5172B信号发生器，注意连接s1和s2线。      \
-                 芯片配置文件：\
-                 CPC5801803_RX_test_2020_cg_2_filter_5_lindao_20200902.txt\
-                 信号发生器配置：symbol rate 512ksps 、alpha 1.0、文件配置PN9-1FF-FM0、Total Bits 两百万或者一千万、realtiem设置为on、打开RF。    \
-                 具体流程：    \
-                 1）确保所有的数据线都已经连接好，给芯片配置好文件。\
-                 2）设置信号源配置\
-                 功率上界和下界的值要根据实际情况设置，为了保证测量的准确性可以设的宽一些。Total Bits一般两百万即可，设置过大时可能导致耗时较长或者测试错误。\
-                 3）选择频率\
-                 4）点击按钮开始测试，然后在弹窗处选择提前准备好的excel文件。        \
-                 点击该按钮时，程序会自动给信号源按照设置的参数进行配置。\
-                 频率选择5.83GHz时，测试5.83GHZ通道，从功率上界开始，以步长为单位扫描到功率下届。测试完成后，可以选择5.84GHz，再次点击开始按钮，进行5.84GHz通道的接收灵敏度测试。\
-                 5）程序测试完成后，会弹出测试结束的窗口，同时芯片号文本框自动加一。程序中的所有文本框都是可以操作的，即手动更改数据。\
-                 2、Rx频点测试\
-                 该测试会按照普通接收灵敏度测试模式先在5.83GHz和5.84GHz两个通道下进行接收灵敏度测试并且进行比较。当找不到某一个通道的灵敏度或者两个通道的灵敏度值相差过大（绝对值大于等于3）时，程序终止。       \
-                 当5.83GHz和5.84GHz两个通道的灵敏度绝对值小于等于2时，程序会判断两个通道的接收灵敏度与平均灵敏度的差值。平均灵敏度的值需要提前设置，一般是多次测量接收灵敏度后得到的均值。如果某个通道的灵敏度与平均灵敏度的值大于等于4，则程序终止。\
-                 以上步骤完成后，程序将两个通道的灵敏度分别加六然后在提前设置好的频点下进行灵敏度测量。即固定功率，变更频率，看是否满足误码率要求。  \
-                 目前经常测量的频点为：\
-                 5.8283/5.8285/5.8315/5.8316/5.8317/5.8383/5.8385/5.8415/5.8417GHz，而且程序会检测5.83GHz通道下的接收灵敏度加六后在\
-                 5.8283/5.8285/5.8315/5.8316/5.8317频点下是否满足误码率要求，\
-                 以及5.84GHz通道下的接收灵敏度加六后在5.8383/5.8385/5.8415/\
-                 5.8417GHz频点下的误码率情况。\
-                 测试目的：当芯片的5.83和5.84GHz两个通道的接收灵敏度误差不大的情况下，检测灵敏度+6在不同频点下的接收误码率情况。\
-                 连接设置：pc连接芯片，芯片连接N5172B信号发生器，注意连接s1和s2线。      \
-                 芯片配置文件：\
-                 CPC5801803_RX_test_2020_cg_2_filter_5_lindao_20200902.txt\
-                 信号发生器配置：symbol rate 512ksps 、alpha 1.0、文件配置PN9-1FF-FM0、Total Bits 两百万或者一千万、realtiem设置为on、打开RF。    \
-                 具体流程：  \
-                 1）确保所有的数据线都已经连接好，给芯片配置好文件\
-                 2）设置信号源配置\
-                 3）设置好测试频点\
-                 频点设置可以手动设置，直接在软件表格中更改，单位均为GHz。或者选择已经准备好的excel文件，将频点读入软件表格。点击读取测试数据按钮可以读取数据。数据在excel中只需填写频点即可，且只能写在第一行如下图所示。\
-                 当手动输入频点时，可以根据实际需要使用添加和删除按钮操作软件表格的行与列。但是频点是能填写在软件表格的第一行，第二行是为填写功率做准备的，在Rx跳点测试中使用。   \
-                 4）点击按钮开始测试，然后在弹窗处选择提前准备好的excel文件\
-                 Rx频点测试在测试过程中会根据实际测试情况进行不同的判定与结果输出，所以一定要注意程序在测试过程中的提示。\
-                 3、Rx跳点测试  \
-                 Rx跳点测试是根据指定的频率与功率组合，测量误码率的测试项目。在连接好数据线等之后，需要先把频率和功率值读进软件表格。这一步可以手动填写，也可以读取excel文件实现。  \
-                 测试目的：测试频率点在不同功率点下的误码率情况。频率和功率值都是不连续的。\
-                 连接设置：pc连接芯片，芯片连接N5172B信号发生器，注意连接s1和s2线。      \
-                 芯片配置文件：\
-                 CPC5801803_RX_test_2020_cg_2_filter_5_lindao_20200902.txt\
-                 信号发生器配置：symbol rate 512ksps 、alpha 1.0、文件配置PN9-1FF-FM0、Total Bits 两百万或者一千万、realtiem设置为on、打开RF。    \
-                 具体流程：    \
-                 1）确保所有的数据线都已经连接好，给芯片配置好文件\
-                 2）设置信号源配置\
-                 3）设置好测试频点和功率点\
-                 频点和功率设置可以手动设置，直接在软件表格中更改。或者选择已经准备好的excel文件，将频点读入软件表格。点击读取测试数据按钮可以读取数据。\
-                 当手动输入频点时，可以根据实际需要使用添加和删除按钮操作软件表格的行与列。   \
-                 4）点击按钮开始测试，然后在弹窗处选择提前准备好的excel文件\
-                 Rx跳点测试会读取依次读取频点，在信号源中设置。然后测试每一个频点在各个功率值条件下的误码率。即5.8258GHz在-43、-52、-67dBm下的误码率，以此类推。    \
-                 4、Rx带宽测试-单点      \
-                 测试目的：该测试项目主要是固定功率值，测量设定频率范围下的误码率。       \
-                 连接设置：pc连接芯片，芯片连接N5172B信号发生器，注意连接s1和s2线。    \
-                 芯片配置文件：\
-                 CPC5801803_RX_test_2020_cg_2_filter_5_lindao_20200902.txt   \
-                 信号发生器配置：symbol rate 512ksps 、alpha 1.0、文件配置PN9-1FF-FM0、Total Bits 两百万或者一千万、realtiem设置为on、打开RF。   \
-                 具体流程：      \
-                 1）确保所有的数据线都已经连接好，给芯片配置好文件\
-                 2）设置信号源配置\
-                 此处主要设置Total Bits、误码率标准以及芯片号\
-                 3）设置好功率值和带宽范围\
-                 此处设置灵敏度，程序会在运行过程中自动加六，然后对信号源进行设置。还需要设置频率上限和频率下限，以及步长。这两个频率的差值就是所需要的测量的带宽范围。在频率和带宽设置过程中，需要注意单位，以确保填写数据的准确。\
-                 4）点击按钮开始测试，然后在弹窗处选择提前准备好的excel文件     \
-                 5、Rx带宽测试-多点\
-                 测试目的：该测试的目的是给定带宽范围和功率范围，测量每一个频点在给定功率范围下的误码率。\
-                 连接设置：pc连接芯片，芯片连接N5172B信号发生器，注意连接s1和s2线。      \
-                 芯片配置文件：   \
-                 CPC5801803_RX_test_2020_cg_2_filter_5_lindao_20200902.txt\
-                 信号发生器配置：symbol rate 512ksps 、alpha 1.0、文件配置PN9-1FF-FM0、Total Bits 两百万或者一千万、realtiem设置为on、打开RF。     \
-                 具体流程：\
-                 1）确保所有的数据线都已经连接好，给芯片配置好文件\
-                 2）设置信号源配置\
-                 此处主要设置Total Bits、误码率标准以及芯片号\
-                 3）设置好带宽范围，功率范围以及各自相应的步长\
-                 这里填写的灵敏度会自动加六然后设置在信号发生器中。程序从频率下限开始依据每一步的步长扫描到频率表上限，在每一个频点都从灵敏度+6的范围依据步长扫描到灵敏度上限，记录每一个频点、功率值下的误码率。\
-                 4）、点击按钮开始测试，然后在弹窗处选择提前准备好的excel文件         \
-                 6、Rx最大功率测试\
-                 测试目的：在接收灵敏度测量中，求的是下限。这里的程序设置可以求得接收灵敏度的上限。\
-                 连接设置：pc连接芯片，芯片连接N5172B信号发生器，注意连接s1和s2线。       \
-                 芯片配置文件：\
-                 CPC5801803_RX_test_2020_cg_2_filter_5_lindao_20200902.txt\
-                 信号发生器配置：symbol rate 512ksps 、alpha 1.0、文件配置PN9-1FF-FM0、Total Bits 两百万或者一千万、realtiem设置为on、打开RF。   \
-                 具体流程：\
-                 1）确保所有的数据线都已经连接好，给芯片配置好文件\
-                 2）设置信号源配置\
-                 此处主要设置Total Bits、误码率标准以及芯片号\
-                 3）在这里设置功率下限，即接收灵敏度。设置功率上限，以防止功率设的太大。这里只能设置一个频率点。     \
-                 在设置信号发生器参数时，程序会将这里的灵敏度加六。\
-                 4）点击按钮开始测试，然后在弹窗处选择提前准备好的excel文件";
-        ui->plainTextEdit->setPlainText(str);
-     });
-     connect(ui->btnWuEx,&QPushButton::clicked,[&]()
-     {
-         QString str="1、固定测试  \
-                 测试目的：该测试利用观察14K方波的方式测量芯片的唤醒灵敏度，这个测试项目固定测试5.83GHz和5.84GHz两个通道的唤醒灵敏度。\
-                 连接设置：pc连接芯片，芯片连接N5172B信号发生器，这里不需要使用s1和s2线。DPO7254示波器需要打开TeKVISA Line Server Control，然后用探针或者线连接芯片板的WU-OUT孔。示波器和PC通过网线连接。\
-                 芯片配置文件：\
-                 CPC5801803_WU_Normal_work_WKRX_TGAP0s3_BST_WU4ms-20200902_55dbm.txt      \
-                 信号发生器配置：symbol rate 28ksps 、alpha 1.0、文件配置14K_TEST_28@BIT、realtiem设置为on、打开RF。\
-                 具体流程： \
-                 1）确保所有的数据线都已经连接好，给芯片配置好文件\
-                 2）配置信号源\
-                 3）配置示波器\
-                 进行完这三步的设置后，在示波器上可以看到很明显的方波\
-                 4）设置好程序要扫描的功率范围\
-                 注:这里无需设置频率\
-                 5）点击按钮开始测试，然后在弹窗处选择提前准备好的excel文件\
-                 程序会自动从功率上界开始，依据步长扫描到功率下界，当示波器方波消失的时候，程序自动记录当前功率值。程序会自动扫描5.83和5.84GHz两个频点下功率范围，分别记录灵敏度。\
-                 2、固定测试  \
-                 测试目的：该测试利用观察14K方波的方式测量芯片的唤醒灵敏度。\
-                 这个测试项目可以测试任意频率通道的唤醒灵敏度，单次只能测量一个通道。    \
-                 连接设置：pc连接芯片，芯片连接N5172B信号发生器，这里不需要使用s1和s2线。DPO7254示波器需要打开TeKVISA Line Server Control，然后用探针或者线连接芯片板的WU-OUT孔。示波器和PC通过网线连接。\
-                 芯片配置文件：\
-                 CPC5801803_WU_Normal_work_WKRX_TGAP0s3_BST_WU4ms-20200902_55dbm.txt    \
-                 信号发生器配置：symbol rate 28ksps 、alpha 1.0、文件配置14K_TEST_28@BIT、realtiem设置为on、打开RF。\
-                 具体流程：  \
-                 1）确保所有的数据线都已经连接好，给芯片配置好文件\
-                 2）配置信号源\
-                 3）配置示波器\
-                 进行完这三步的设置后，在示波器上可以看到很明显的方波\
-                 4）设置好程序要扫描的功率范围\
-                 5）点击按钮开始测试，然后在弹窗处选择提前准备好的excel文件\
-                 程序运行过程同固定测试，但是只能测量指定通道。\
-                 3、唤醒最大功率测试\
-                 测试目的：该测试利用观察14K方波的方式测量芯片的唤醒灵敏度。\
-                 测量的是指定通道，唤醒的最大功率值。       \
-                 连接设置：pc连接芯片，芯片连接N5172B信号发生器，这里不需要使用s1和s2线。DPO7254示波器需要打开TeKVISA Line Server Control，然后用探针或者线连接芯片板的WU-OUT孔。示波器和PC通过网线连接。\
-                 芯片配置文件：\
-                 CPC5801803_WU_Normal_work_WKRX_TGAP0s3_BST_WU4ms-20200902_55dbm.txt      \
-                 信号发生器配置：symbol rate 28ksps 、alpha 1.0、文件配置14K_TEST_28@BIT、realtiem设置为on、打开RF\
-                 具体流程：  \
-                 1）确保所有的数据线都已经连接好，给芯片配置好文件\
-                 2）配置信号源\
-                 3）配置示波器\
-                 进行完这三步的设置后，在示波器上可以看到很明显的方波\
-                 4）设置好程序要扫描的功率范围\
-                 5）点击按钮开始测试，然后在弹窗处选择提前准备好的excel文件\
-                 程序会自动从功率下界开始依据步长扫描到功率上届，当无法检测到方波时，记录当前功率值。单次只能检测一个通道。\
-                 4、其他  \
-                 Excel行数：在所有唤醒灵敏度测试模式中，可以通过这里设置调整excel行数    \
-                 芯片号：在所有唤醒灵敏度测试模式中，此处可以自动更新芯片号，也可以手动变更";
+                ui->plainTextEdit->setPlainText(str);
+    });
+    connect(ui->btnRxEx,&QPushButton::clicked,[&]()
+    {
+        QString str="1、Rx灵敏度测试\
+                测试目的：判断芯片在某一频率下、能够满足误码率要求（通常是，其他涉及误码率的测试，均以此值为标准）的灵敏度下限。\
+                连接设置：pc连接芯片，芯片连接N5172B信号发生器，注意连接s1和s2线。      \
+                芯片配置文件：\
+                CPC5801803_RX_test_2020_cg_2_filter_5_lindao_20200902.txt\
+                信号发生器配置：symbol rate 512ksps 、alpha 1.0、文件配置PN9-1FF-FM0、Total Bits 两百万或者一千万、realtiem设置为on、打开RF。    \
+                具体流程：    \
+                1）确保所有的数据线都已经连接好，给芯片配置好文件。\
+                2）设置信号源配置\
+                功率上界和下界的值要根据实际情况设置，为了保证测量的准确性可以设的宽一些。Total Bits一般两百万即可，设置过大时可能导致耗时较长或者测试错误。\
+                3）选择频率\
+                4）点击按钮开始测试，然后在弹窗处选择提前准备好的excel文件。        \
+                点击该按钮时，程序会自动给信号源按照设置的参数进行配置。\
+                频率选择5.83GHz时，测试5.83GHZ通道，从功率上界开始，以步长为单位扫描到功率下届。测试完成后，可以选择5.84GHz，再次点击开始按钮，进行5.84GHz通道的接收灵敏度测试。\
+                5）程序测试完成后，会弹出测试结束的窗口，同时芯片号文本框自动加一。程序中的所有文本框都是可以操作的，即手动更改数据。\
+                2、Rx频点测试\
+                该测试会按照普通接收灵敏度测试模式先在5.83GHz和5.84GHz两个通道下进行接收灵敏度测试并且进行比较。当找不到某一个通道的灵敏度或者两个通道的灵敏度值相差过大（绝对值大于等于3）时，程序终止。       \
+                当5.83GHz和5.84GHz两个通道的灵敏度绝对值小于等于2时，程序会判断两个通道的接收灵敏度与平均灵敏度的差值。平均灵敏度的值需要提前设置，一般是多次测量接收灵敏度后得到的均值。如果某个通道的灵敏度与平均灵敏度的值大于等于4，则程序终止。\
+                以上步骤完成后，程序将两个通道的灵敏度分别加六然后在提前设置好的频点下进行灵敏度测量。即固定功率，变更频率，看是否满足误码率要求。  \
+                目前经常测量的频点为：\
+                5.8283/5.8285/5.8315/5.8316/5.8317/5.8383/5.8385/5.8415/5.8417GHz，而且程序会检测5.83GHz通道下的接收灵敏度加六后在\
+                5.8283/5.8285/5.8315/5.8316/5.8317频点下是否满足误码率要求，\
+                以及5.84GHz通道下的接收灵敏度加六后在5.8383/5.8385/5.8415/\
+                5.8417GHz频点下的误码率情况。\
+                测试目的：当芯片的5.83和5.84GHz两个通道的接收灵敏度误差不大的情况下，检测灵敏度+6在不同频点下的接收误码率情况。\
+                连接设置：pc连接芯片，芯片连接N5172B信号发生器，注意连接s1和s2线。      \
+                芯片配置文件：\
+                CPC5801803_RX_test_2020_cg_2_filter_5_lindao_20200902.txt\
+                信号发生器配置：symbol rate 512ksps 、alpha 1.0、文件配置PN9-1FF-FM0、Total Bits 两百万或者一千万、realtiem设置为on、打开RF。    \
+                具体流程：  \
+                1）确保所有的数据线都已经连接好，给芯片配置好文件\
+                2）设置信号源配置\
+                3）设置好测试频点\
+                频点设置可以手动设置，直接在软件表格中更改，单位均为GHz。或者选择已经准备好的excel文件，将频点读入软件表格。点击读取测试数据按钮可以读取数据。数据在excel中只需填写频点即可，且只能写在第一行如下图所示。\
+                当手动输入频点时，可以根据实际需要使用添加和删除按钮操作软件表格的行与列。但是频点是能填写在软件表格的第一行，第二行是为填写功率做准备的，在Rx跳点测试中使用。   \
+                4）点击按钮开始测试，然后在弹窗处选择提前准备好的excel文件\
+                Rx频点测试在测试过程中会根据实际测试情况进行不同的判定与结果输出，所以一定要注意程序在测试过程中的提示。\
+                3、Rx跳点测试  \
+                Rx跳点测试是根据指定的频率与功率组合，测量误码率的测试项目。在连接好数据线等之后，需要先把频率和功率值读进软件表格。这一步可以手动填写，也可以读取excel文件实现。  \
+                测试目的：测试频率点在不同功率点下的误码率情况。频率和功率值都是不连续的。\
+                连接设置：pc连接芯片，芯片连接N5172B信号发生器，注意连接s1和s2线。      \
+                芯片配置文件：\
+                CPC5801803_RX_test_2020_cg_2_filter_5_lindao_20200902.txt\
+                信号发生器配置：symbol rate 512ksps 、alpha 1.0、文件配置PN9-1FF-FM0、Total Bits 两百万或者一千万、realtiem设置为on、打开RF。    \
+                具体流程：    \
+                1）确保所有的数据线都已经连接好，给芯片配置好文件\
+                2）设置信号源配置\
+                3）设置好测试频点和功率点\
+                频点和功率设置可以手动设置，直接在软件表格中更改。或者选择已经准备好的excel文件，将频点读入软件表格。点击读取测试数据按钮可以读取数据。\
+                当手动输入频点时，可以根据实际需要使用添加和删除按钮操作软件表格的行与列。   \
+                4）点击按钮开始测试，然后在弹窗处选择提前准备好的excel文件\
+                Rx跳点测试会读取依次读取频点，在信号源中设置。然后测试每一个频点在各个功率值条件下的误码率。即5.8258GHz在-43、-52、-67dBm下的误码率，以此类推。    \
+                4、Rx带宽测试-单点      \
+                测试目的：该测试项目主要是固定功率值，测量设定频率范围下的误码率。       \
+                连接设置：pc连接芯片，芯片连接N5172B信号发生器，注意连接s1和s2线。    \
+                芯片配置文件：\
+                CPC5801803_RX_test_2020_cg_2_filter_5_lindao_20200902.txt   \
+                信号发生器配置：symbol rate 512ksps 、alpha 1.0、文件配置PN9-1FF-FM0、Total Bits 两百万或者一千万、realtiem设置为on、打开RF。   \
+                具体流程：      \
+                1）确保所有的数据线都已经连接好，给芯片配置好文件\
+                2）设置信号源配置\
+                此处主要设置Total Bits、误码率标准以及芯片号\
+                3）设置好功率值和带宽范围\
+                此处设置灵敏度，程序会在运行过程中自动加六，然后对信号源进行设置。还需要设置频率上限和频率下限，以及步长。这两个频率的差值就是所需要的测量的带宽范围。在频率和带宽设置过程中，需要注意单位，以确保填写数据的准确。\
+                4）点击按钮开始测试，然后在弹窗处选择提前准备好的excel文件     \
+                5、Rx带宽测试-多点\
+                测试目的：该测试的目的是给定带宽范围和功率范围，测量每一个频点在给定功率范围下的误码率。\
+                连接设置：pc连接芯片，芯片连接N5172B信号发生器，注意连接s1和s2线。      \
+                芯片配置文件：   \
+                CPC5801803_RX_test_2020_cg_2_filter_5_lindao_20200902.txt\
+                信号发生器配置：symbol rate 512ksps 、alpha 1.0、文件配置PN9-1FF-FM0、Total Bits 两百万或者一千万、realtiem设置为on、打开RF。     \
+                具体流程：\
+                1）确保所有的数据线都已经连接好，给芯片配置好文件\
+                2）设置信号源配置\
+                此处主要设置Total Bits、误码率标准以及芯片号\
+                3）设置好带宽范围，功率范围以及各自相应的步长\
+                这里填写的灵敏度会自动加六然后设置在信号发生器中。程序从频率下限开始依据每一步的步长扫描到频率表上限，在每一个频点都从灵敏度+6的范围依据步长扫描到灵敏度上限，记录每一个频点、功率值下的误码率。\
+                4）、点击按钮开始测试，然后在弹窗处选择提前准备好的excel文件         \
+                6、Rx最大功率测试\
+                测试目的：在接收灵敏度测量中，求的是下限。这里的程序设置可以求得接收灵敏度的上限。\
+                连接设置：pc连接芯片，芯片连接N5172B信号发生器，注意连接s1和s2线。       \
+                芯片配置文件：\
+                CPC5801803_RX_test_2020_cg_2_filter_5_lindao_20200902.txt\
+                信号发生器配置：symbol rate 512ksps 、alpha 1.0、文件配置PN9-1FF-FM0、Total Bits 两百万或者一千万、realtiem设置为on、打开RF。   \
+                具体流程：\
+                1）确保所有的数据线都已经连接好，给芯片配置好文件\
+                2）设置信号源配置\
+                此处主要设置Total Bits、误码率标准以及芯片号\
+                3）在这里设置功率下限，即接收灵敏度。设置功率上限，以防止功率设的太大。这里只能设置一个频率点。     \
+                在设置信号发生器参数时，程序会将这里的灵敏度加六。\
+                4）点击按钮开始测试，然后在弹窗处选择提前准备好的excel文件";
+                ui->plainTextEdit->setPlainText(str);
+    });
+    connect(ui->btnWuEx,&QPushButton::clicked,[&]()
+    {
+        QString str="1、固定测试  \
+                测试目的：该测试利用观察14K方波的方式测量芯片的唤醒灵敏度，这个测试项目固定测试5.83GHz和5.84GHz两个通道的唤醒灵敏度。\
+                连接设置：pc连接芯片，芯片连接N5172B信号发生器，这里不需要使用s1和s2线。DPO7254示波器需要打开TeKVISA Line Server Control，然后用探针或者线连接芯片板的WU-OUT孔。示波器和PC通过网线连接。\
+                芯片配置文件：\
+                CPC5801803_WU_Normal_work_WKRX_TGAP0s3_BST_WU4ms-20200902_55dbm.txt      \
+                信号发生器配置：symbol rate 28ksps 、alpha 1.0、文件配置14K_TEST_28@BIT、realtiem设置为on、打开RF。\
+                具体流程： \
+                1）确保所有的数据线都已经连接好，给芯片配置好文件\
+                2）配置信号源\
+                3）配置示波器\
+                进行完这三步的设置后，在示波器上可以看到很明显的方波\
+                4）设置好程序要扫描的功率范围\
+                注:这里无需设置频率\
+                5）点击按钮开始测试，然后在弹窗处选择提前准备好的excel文件\
+                程序会自动从功率上界开始，依据步长扫描到功率下界，当示波器方波消失的时候，程序自动记录当前功率值。程序会自动扫描5.83和5.84GHz两个频点下功率范围，分别记录灵敏度。\
+                2、固定测试  \
+                测试目的：该测试利用观察14K方波的方式测量芯片的唤醒灵敏度。\
+                这个测试项目可以测试任意频率通道的唤醒灵敏度，单次只能测量一个通道。    \
+                连接设置：pc连接芯片，芯片连接N5172B信号发生器，这里不需要使用s1和s2线。DPO7254示波器需要打开TeKVISA Line Server Control，然后用探针或者线连接芯片板的WU-OUT孔。示波器和PC通过网线连接。\
+                芯片配置文件：\
+                CPC5801803_WU_Normal_work_WKRX_TGAP0s3_BST_WU4ms-20200902_55dbm.txt    \
+                信号发生器配置：symbol rate 28ksps 、alpha 1.0、文件配置14K_TEST_28@BIT、realtiem设置为on、打开RF。\
+                具体流程：  \
+                1）确保所有的数据线都已经连接好，给芯片配置好文件\
+                2）配置信号源\
+                3）配置示波器\
+                进行完这三步的设置后，在示波器上可以看到很明显的方波\
+                4）设置好程序要扫描的功率范围\
+                5）点击按钮开始测试，然后在弹窗处选择提前准备好的excel文件\
+                程序运行过程同固定测试，但是只能测量指定通道。\
+                3、唤醒最大功率测试\
+                测试目的：该测试利用观察14K方波的方式测量芯片的唤醒灵敏度。\
+                测量的是指定通道，唤醒的最大功率值。       \
+                连接设置：pc连接芯片，芯片连接N5172B信号发生器，这里不需要使用s1和s2线。DPO7254示波器需要打开TeKVISA Line Server Control，然后用探针或者线连接芯片板的WU-OUT孔。示波器和PC通过网线连接。\
+                芯片配置文件：\
+                CPC5801803_WU_Normal_work_WKRX_TGAP0s3_BST_WU4ms-20200902_55dbm.txt      \
+                信号发生器配置：symbol rate 28ksps 、alpha 1.0、文件配置14K_TEST_28@BIT、realtiem设置为on、打开RF\
+                具体流程：  \
+                1）确保所有的数据线都已经连接好，给芯片配置好文件\
+                2）配置信号源\
+                3）配置示波器\
+                进行完这三步的设置后，在示波器上可以看到很明显的方波\
+                4）设置好程序要扫描的功率范围\
+                5）点击按钮开始测试，然后在弹窗处选择提前准备好的excel文件\
+                程序会自动从功率下界开始依据步长扫描到功率上届，当无法检测到方波时，记录当前功率值。单次只能检测一个通道。\
+                4、其他  \
+                Excel行数：在所有唤醒灵敏度测试模式中，可以通过这里设置调整excel行数    \
+                芯片号：在所有唤醒灵敏度测试模式中，此处可以自动更新芯片号，也可以手动变更";
 
-        ui->plainTextEdit->setPlainText(str);
-     });
+                ui->plainTextEdit->setPlainText(str);
+    });
 
 }
 

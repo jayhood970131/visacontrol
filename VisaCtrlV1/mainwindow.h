@@ -42,12 +42,12 @@ private:
     bool isAMOn=true;
     bool bertKey=true;
 
-//
+    QString m_appHandle; // 应用程序的句柄符号
     const QString addr_N5172B = "GPIB0::19::INSTR";
     const QString addr_33250A = "GPIB0::10::INSTR";
     const QString addr_R3408B = "TCPIP::192.168.1.6::INSTR";
     const QString addr_DPO7254= "TCPIP::192.168.1.15::INSTR";
- //
+
 //    const QString  addr_DPO7254="Variable:Value \"SetRemoteApplication\",\"DPOPWR\"";
 };
 #endif // MAINWINDOW_H

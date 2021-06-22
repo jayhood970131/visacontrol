@@ -176,6 +176,11 @@ public:
     QPushButton *WuexcelRow;
     QLabel *label_29;
     QLineEdit *EditBoardWu;
+    QLabel *label_50;
+    QLineEdit *tb_wu_chipType;
+    QGroupBox *groupBox_12;
+    QRadioButton *rb_office;
+    QRadioButton *rb_wps;
     QWidget *tab_3;
     QPushButton *btnTxEx;
     QPlainTextEdit *plainTextEdit;
@@ -196,12 +201,12 @@ public:
     {
         if (MainWindow->objectName().isEmpty())
             MainWindow->setObjectName(QString::fromUtf8("MainWindow"));
-        MainWindow->resize(994, 658);
+        MainWindow->resize(1024, 783);
         centralWidget = new QWidget(MainWindow);
         centralWidget->setObjectName(QString::fromUtf8("centralWidget"));
         tabWidget_MainCtrl = new QTabWidget(centralWidget);
         tabWidget_MainCtrl->setObjectName(QString::fromUtf8("tabWidget_MainCtrl"));
-        tabWidget_MainCtrl->setGeometry(QRect(30, 10, 761, 591));
+        tabWidget_MainCtrl->setGeometry(QRect(30, 10, 801, 721));
         tab_2 = new QWidget();
         tab_2->setObjectName(QString::fromUtf8("tab_2"));
         groupBox_4 = new QGroupBox(tab_2);
@@ -645,7 +650,7 @@ public:
         WuMaxAmplTest->setGeometry(QRect(460, 310, 101, 23));
         groupBox_3 = new QGroupBox(tabWUBW);
         groupBox_3->setObjectName(QString::fromUtf8("groupBox_3"));
-        groupBox_3->setGeometry(QRect(0, 420, 321, 121));
+        groupBox_3->setGeometry(QRect(0, 400, 361, 291));
         label_31 = new QLabel(groupBox_3);
         label_31->setObjectName(QString::fromUtf8("label_31"));
         label_31->setGeometry(QRect(20, 20, 71, 41));
@@ -663,10 +668,25 @@ public:
         WuexcelRow->setGeometry(QRect(220, 60, 75, 23));
         label_29 = new QLabel(groupBox_3);
         label_29->setObjectName(QString::fromUtf8("label_29"));
-        label_29->setGeometry(QRect(20, 80, 41, 41));
+        label_29->setGeometry(QRect(20, 80, 71, 41));
         EditBoardWu = new QLineEdit(groupBox_3);
         EditBoardWu->setObjectName(QString::fromUtf8("EditBoardWu"));
         EditBoardWu->setGeometry(QRect(120, 90, 81, 21));
+        label_50 = new QLabel(groupBox_3);
+        label_50->setObjectName(QString::fromUtf8("label_50"));
+        label_50->setGeometry(QRect(20, 120, 81, 41));
+        tb_wu_chipType = new QLineEdit(groupBox_3);
+        tb_wu_chipType->setObjectName(QString::fromUtf8("tb_wu_chipType"));
+        tb_wu_chipType->setGeometry(QRect(120, 130, 81, 21));
+        groupBox_12 = new QGroupBox(groupBox_3);
+        groupBox_12->setObjectName(QString::fromUtf8("groupBox_12"));
+        groupBox_12->setGeometry(QRect(20, 170, 261, 61));
+        rb_office = new QRadioButton(groupBox_12);
+        rb_office->setObjectName(QString::fromUtf8("rb_office"));
+        rb_office->setGeometry(QRect(20, 30, 91, 18));
+        rb_wps = new QRadioButton(groupBox_12);
+        rb_wps->setObjectName(QString::fromUtf8("rb_wps"));
+        rb_wps->setGeometry(QRect(150, 30, 91, 18));
         tabWidget_MainCtrl->addTab(tabWUBW, QString());
         tab_3 = new QWidget();
         tab_3->setObjectName(QString::fromUtf8("tab_3"));
@@ -685,7 +705,7 @@ public:
         tabWidget_MainCtrl->addTab(tab_3, QString());
         groupBox_8 = new QGroupBox(centralWidget);
         groupBox_8->setObjectName(QString::fromUtf8("groupBox_8"));
-        groupBox_8->setGeometry(QRect(800, 110, 171, 201));
+        groupBox_8->setGeometry(QRect(840, 180, 171, 201));
         btnDect = new QPushButton(groupBox_8);
         btnDect->setObjectName(QString::fromUtf8("btnDect"));
         btnDect->setGeometry(QRect(20, 30, 61, 23));
@@ -707,7 +727,7 @@ public:
         MainWindow->setCentralWidget(centralWidget);
         menuBar = new QMenuBar(MainWindow);
         menuBar->setObjectName(QString::fromUtf8("menuBar"));
-        menuBar->setGeometry(QRect(0, 0, 994, 23));
+        menuBar->setGeometry(QRect(0, 0, 1024, 22));
         MainWindow->setMenuBar(menuBar);
         mainToolBar = new QToolBar(MainWindow);
         mainToolBar->setObjectName(QString::fromUtf8("mainToolBar"));
@@ -878,8 +898,13 @@ public:
         label_34->setText(QApplication::translate("MainWindow", "excel\350\241\214\346\225\260", nullptr));
         WulineRow->setText(QApplication::translate("MainWindow", "2", nullptr));
         WuexcelRow->setText(QApplication::translate("MainWindow", "\350\256\276\347\275\256", nullptr));
-        label_29->setText(QApplication::translate("MainWindow", "\345\272\217\345\217\267", nullptr));
+        label_29->setText(QApplication::translate("MainWindow", "\350\212\257\347\211\207\345\272\217\345\217\267", nullptr));
         EditBoardWu->setText(QApplication::translate("MainWindow", "1", nullptr));
+        label_50->setText(QApplication::translate("MainWindow", "\350\212\257\347\211\207\347\261\273\345\236\213", nullptr));
+        tb_wu_chipType->setText(QApplication::translate("MainWindow", "1", nullptr));
+        groupBox_12->setTitle(QApplication::translate("MainWindow", "\344\277\235\345\255\230\346\226\207\344\273\266\347\261\273\345\236\213", nullptr));
+        rb_office->setText(QApplication::translate("MainWindow", "OFFICE", nullptr));
+        rb_wps->setText(QApplication::translate("MainWindow", "WPS", nullptr));
         tabWidget_MainCtrl->setTabText(tabWidget_MainCtrl->indexOf(tabWUBW), QApplication::translate("MainWindow", "\345\224\244\351\206\222\344\277\241\345\217\267\346\265\213\350\257\225", nullptr));
         btnTxEx->setText(QApplication::translate("MainWindow", "Tx\350\276\223\345\207\272\345\212\237\347\216\207", nullptr));
         btnRxEx->setText(QApplication::translate("MainWindow", "RX\347\201\265\346\225\217\345\272\246\346\265\213\350\257\225", nullptr));
